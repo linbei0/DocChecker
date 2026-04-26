@@ -14,6 +14,7 @@
 ```bash
 uv sync
 uv run uvicorn docchecker.api.main:app --reload
+uv run uvicorn docchecker.api.main:app --reload --port 8001
 ```
 
 ## 运行检查
