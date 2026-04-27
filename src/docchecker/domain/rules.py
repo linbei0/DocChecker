@@ -34,6 +34,27 @@ class FormatRule(BaseModel):
     enabled: bool = True
 
 
+class ExtractionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_requirements: int = 0
+    structured_rules: int = 0
+    unsupported_requirements: int = 0
+    low_confidence_rules: int = 0
+    supported_categories: list[RuleCategory] = Field(default_factory=list)
+    unsupported_categories: list[RuleCategory] = Field(default_factory=list)
+    uncovered_categories: list[RuleCategory] = Field(default_factory=list)
+
+
+class UnsupportedRequirement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: RuleCategory
+    excerpt: str
+    location: str | None = None
+    reason: str
+
+
 class RuleSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,6 +78,8 @@ class DraftRuleSet(BaseModel):
     locale: str = "zh-CN"
     rules: list[FormatRule] = Field(default_factory=list)
     parse_warnings: list[str] = Field(default_factory=list)
+    extraction_summary: ExtractionSummary = Field(default_factory=ExtractionSummary)
+    unsupported_requirements: list[UnsupportedRequirement] = Field(default_factory=list)
     status: DraftRuleSetStatus = DraftRuleSetStatus.draft
     published_ruleset_id: str | None = None
     created_at: str

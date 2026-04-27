@@ -10,6 +10,9 @@ def test_extract_requirement_text_includes_word_comments(tmp_path: Path) -> None
     path = tmp_path / "requirement.docx"
     document = Document()
     document.add_paragraph("中文论文题目")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "正文"
+    table.cell(0, 1).text = "宋体小四"
     document.save(path)
 
     with ZipFile(path, "a", ZIP_DEFLATED) as package:
@@ -28,3 +31,6 @@ def test_extract_requirement_text_includes_word_comments(tmp_path: Path) -> None
 
     assert "中文论文题目" in text
     assert "三号宋体加粗居中" in text
+    assert "paragraph:1" in text
+    assert "table:1,row:1" in text
+    assert "comment:0" in text

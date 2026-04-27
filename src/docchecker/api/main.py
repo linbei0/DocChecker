@@ -11,7 +11,13 @@ from docchecker.core.config import get_settings
 from docchecker.domain.enums import DraftRuleSetStatus, SourceType, TaskStatus
 from docchecker.domain.findings import CheckReport
 from docchecker.domain.requirements import RequirementDocument
-from docchecker.domain.rules import DraftRuleSet, FormatRule, RuleSet
+from docchecker.domain.rules import (
+    DraftRuleSet,
+    ExtractionSummary,
+    FormatRule,
+    RuleSet,
+    UnsupportedRequirement,
+)
 from docchecker.domain.tasks import CheckTask
 from docchecker.services.check_service import CheckService
 from docchecker.services.docx_validator import DocumentValidationError, validate_docx_path
@@ -145,6 +151,8 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
             raise HTTPException(status_code=404, detail="模板规则集不存在。")
         rules = [rule.model_copy(deep=True) for rule in template.rules]
         warnings: list[str] = []
+        extraction_summary = ExtractionSummary(structured_rules=len(rules))
+        unsupported_requirements: list[UnsupportedRequirement] = []
         name = f"{template.name} 副本"
     else:
         text = request.manual_text or ""
@@ -156,6 +164,8 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         result = extract_rules_from_text(text, source_type=request.source_type)
         rules = result.rules
         warnings = result.parse_warnings
+        extraction_summary = result.extraction_summary
+        unsupported_requirements = result.unsupported_requirements
         name = "候选规则集"
 
     draft = DraftRuleSet(
@@ -165,6 +175,8 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         source_type=request.source_type,
         rules=rules,
         parse_warnings=warnings,
+        extraction_summary=extraction_summary,
+        unsupported_requirements=unsupported_requirements,
         created_at=now,
         updated_at=now,
     )

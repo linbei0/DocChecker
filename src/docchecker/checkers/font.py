@@ -7,7 +7,7 @@ from docchecker.domain.rules import FormatRule
 
 class FontChecker:
     checker_id = "font_checker"
-    supported_categories = {RuleCategory.font}
+    supported_categories = {RuleCategory.font, RuleCategory.heading}
 
     def check(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
         findings: list[CheckFinding] = []
@@ -52,7 +52,11 @@ class FontChecker:
 def _matching_paragraphs(document: DocumentModel, rule: FormatRule) -> list[ParagraphNode]:
     selector = rule.target.selector
     if selector:
-        return [p for p in document.paragraphs if p.style_name == selector and p.text.strip()]
+        return [
+            p
+            for p in document.paragraphs
+            if p.text.strip() and (p.style_name == selector or selector in p.text)
+        ]
     return [p for p in document.paragraphs if p.text.strip()]
 
 
@@ -60,6 +64,8 @@ def _field_name(field: str) -> str:
     return {
         "fontFamilyEastAsia": "font_family",
         "fontSizePt": "font_size_pt",
+        "spaceBeforePt": "space_before_pt",
+        "spaceAfterPt": "space_after_pt",
     }.get(field, field)
 
 

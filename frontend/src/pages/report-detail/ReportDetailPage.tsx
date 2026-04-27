@@ -6,10 +6,16 @@ import { useReportQuery, useExportReportQuery } from '@/features/reports/hooks'
 import { cn } from '@/shared/lib/utils'
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router'
+import {
+  categoryLabel,
+  filterFindings,
+  normalizeSeverity,
+  type CategoryFilter,
+  type SeverityFilter,
+} from './reportFilters'
 
 const severityFilters = [
   { key: 'all', label: '全部' },
-  { key: 'blocker', label: '阻断' },
   { key: 'major', label: '严重' },
   { key: 'minor', label: '一般' },
   { key: 'info', label: '提示' },
@@ -25,35 +31,30 @@ const categoryFilters = [
 
 export function ReportDetailPage() {
   const { reportId } = useParams<{ reportId: string }>()
-  const [activeSeverity, setActiveSeverity] = useState('all')
-  const [activeCategory, setActiveCategory] = useState('all')
+  const [activeSeverity, setActiveSeverity] = useState<SeverityFilter>('all')
+  const [activeCategory, setActiveCategory] = useState<CategoryFilter>('all')
 
   const { data: report, isLoading } = useReportQuery(reportId || '')
   const { data: exportData } = useExportReportQuery(reportId || '')
 
   const summary = useMemo(() => {
-    if (!report) return { total: 0, blocker: 0, major: 0, minor: 0, info: 0 }
+    if (!report) return { total: 0, major: 0, minor: 0, info: 0 }
     const findings = report.findings
     return {
       total: findings.length,
-      blocker: findings.filter((f) => f.severity === 'blocker').length,
-      major: findings.filter((f) => f.severity === 'major').length,
-      minor: findings.filter((f) => f.severity === 'minor').length,
-      info: findings.filter((f) => f.severity === 'info').length,
+      major: findings.filter((f) => normalizeSeverity(f.severity) === 'major').length,
+      minor: findings.filter((f) => normalizeSeverity(f.severity) === 'minor').length,
+      info: findings.filter((f) => normalizeSeverity(f.severity) === 'info').length,
     }
   }, [report])
 
   const score = useMemo(() => {
-    return Math.max(0, 100 - summary.blocker * 15 - summary.major * 8 - summary.minor * 3 - summary.info * 1)
+    return Math.max(0, 100 - summary.major * 8 - summary.minor * 3 - summary.info * 1)
   }, [summary])
 
   const filteredFindings = useMemo(() => {
     if (!report) return []
-    return report.findings.filter((f) => {
-      const matchSeverity = activeSeverity === 'all' || f.severity === activeSeverity
-      const matchCategory = activeCategory === 'all' || f.category === activeCategory
-      return matchSeverity && matchCategory
-    })
+    return filterFindings(report.findings, activeSeverity, activeCategory)
   }, [report, activeSeverity, activeCategory])
 
   const handleExport = () => {
@@ -125,9 +126,8 @@ export function ReportDetailPage() {
 
         <div className="bg-white rounded-xl border border-neutral-200 p-6 shadow-sm">
           <p className="text-sm font-medium text-neutral-900 mb-3">问题分布</p>
-          <div className="grid grid-cols-5 gap-2 text-center">
+          <div className="grid grid-cols-4 gap-2 text-center">
             {[
-              { label: '阻断', count: summary.blocker, color: 'text-danger-600 bg-danger-50' },
               { label: '严重', count: summary.major, color: 'text-warning-600 bg-warning-50' },
               { label: '一般', count: summary.minor, color: 'text-primary-600 bg-primary-50' },
               { label: '提示', count: summary.info, color: 'text-neutral-600 bg-neutral-100' },
@@ -169,7 +169,7 @@ export function ReportDetailPage() {
               {severityFilters.map((f) => (
                 <button
                   key={f.key}
-                  onClick={() => setActiveSeverity(f.key)}
+                  onClick={() => setActiveSeverity(f.key as SeverityFilter)}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                     activeSeverity === f.key
@@ -188,7 +188,7 @@ export function ReportDetailPage() {
               {categoryFilters.map((f) => (
                 <button
                   key={f.key}
-                  onClick={() => setActiveCategory(f.key)}
+                  onClick={() => setActiveCategory(f.key as CategoryFilter)}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                     activeCategory === f.key
@@ -201,14 +201,24 @@ export function ReportDetailPage() {
               ))}
             </div>
           </div>
+          <div className="ml-auto text-sm text-neutral-500">
+            当前显示 {filteredFindings.length} / {report.findings.length} 个问题
+          </div>
         </div>
 
         {/* Findings Table */}
-        <div className="overflow-x-auto">
+        {filteredFindings.length === 0 ? (
+          <div className="px-6 py-12 text-center text-neutral-400">
+            <CheckCircle className="mx-auto mb-2 h-8 w-8" />
+            <p>没有符合条件的问题</p>
+          </div>
+        ) : (
+        <div key={`${activeSeverity}-${activeCategory}`} className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-neutral-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">严重程度</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">类别</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">规则</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">位置</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">期望值</th>
@@ -218,19 +228,12 @@ export function ReportDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200">
-              {filteredFindings.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-neutral-400">
-                    <CheckCircle className="mx-auto h-8 w-8 mb-2" />
-                    <p>没有符合条件的问题</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredFindings.map((finding) => (
+              {filteredFindings.map((finding) => (
                   <tr key={finding.id} className="hover:bg-neutral-50 transition-colors">
                     <td className="px-6 py-4">
-                      <SeverityBadge severity={finding.severity} />
+                      <SeverityBadge severity={normalizeSeverity(finding.severity)} />
                     </td>
+                    <td className="px-6 py-4 text-neutral-700">{categoryLabel(finding.category)}</td>
                     <td className="px-6 py-4 text-neutral-900 font-medium">{finding.rule_id}</td>
                     <td className="px-6 py-4 text-neutral-700">
                       {finding.location.section_path || '-'}
@@ -247,11 +250,11 @@ export function ReportDetailPage() {
                     <td className="px-6 py-4 text-neutral-600 text-xs max-w-xs">{finding.evidence}</td>
                     <td className="px-6 py-4 text-neutral-600 text-xs max-w-xs">{finding.suggestion}</td>
                   </tr>
-                ))
-              )}
+                ))}
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   )

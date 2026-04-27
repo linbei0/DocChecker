@@ -89,6 +89,9 @@ export function RuleConfirmPage() {
   }
 
   const enabledCount = rules.filter((rule) => rule.enabled !== false).length
+  const summary = draft.extraction_summary
+  const unsupportedRequirements = draft.unsupported_requirements ?? []
+  const lowConfidenceRules = rules.filter((rule) => (rule.confidence ?? 1) < 0.8)
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -129,13 +132,48 @@ export function RuleConfirmPage() {
         </div>
       )}
 
+      {summary && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-4">
+          <SummaryMetric label="识别到要求" value={summary.total_requirements} />
+          <SummaryMetric label="可自动校验" value={summary.structured_rules} tone="success" />
+          <SummaryMetric label="需人工确认" value={summary.low_confidence_rules} tone="warning" />
+          <SummaryMetric label="当前不可校验" value={summary.unsupported_requirements} tone="danger" />
+        </div>
+      )}
+
+      {unsupportedRequirements.length > 0 && (
+        <div className="mb-4 rounded-xl border border-warning-100 bg-warning-50 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-warning-700">
+            <AlertCircle className="h-4 w-4" />
+            当前不可自动校验的要求
+          </div>
+          <div className="mt-3 space-y-2">
+            {unsupportedRequirements.map((item, index) => (
+              <div key={`${item.category}-${item.location || index}`} className="rounded-lg bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  <span className="font-medium text-neutral-700">{item.category}</span>
+                  {item.location && <span>{item.location}</span>}
+                </div>
+                <p className="mt-1 text-sm text-neutral-700">{item.excerpt}</p>
+                <p className="mt-1 text-xs text-warning-700">{item.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-neutral-900">规则列表</span>
+            <span className="text-sm font-medium text-neutral-900">可自动校验规则</span>
             <span className="text-xs text-neutral-500">
               ({enabledCount}/{rules.length} 条已启用)
             </span>
+            {lowConfidenceRules.length > 0 && (
+              <span className="rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700">
+                {lowConfidenceRules.length} 条需核对
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => setAllRulesEnabled(true)}>
@@ -210,6 +248,30 @@ export function RuleConfirmPage() {
   )
 }
 
+function SummaryMetric({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: number
+  tone?: 'neutral' | 'success' | 'warning' | 'danger'
+}) {
+  const toneClass = {
+    neutral: 'text-neutral-900',
+    success: 'text-success-600',
+    warning: 'text-warning-700',
+    danger: 'text-danger-600',
+  }[tone]
+
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <p className="text-xs text-neutral-500">{label}</p>
+      <p className={cn('mt-1 text-2xl font-semibold', toneClass)}>{value}</p>
+    </div>
+  )
+}
+
 function RuleRow({
   rule,
   expanded,
@@ -278,6 +340,10 @@ function RuleRow({
                 <p className="text-xs text-neutral-500">来源片段</p>
                 <p className="mt-2 rounded-lg border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
                   {rule.source.excerpt || '无来源片段'}
+                </p>
+                <p className="mt-2 text-xs text-neutral-500">
+                  来源位置：{rule.source.location || '未定位'} · 置信度：
+                  {Math.round((rule.confidence ?? 1) * 100)}%
                 </p>
               </div>
               <div className="space-y-3">

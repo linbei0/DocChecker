@@ -42,6 +42,8 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     assert draft_response.status_code == 200
     draft = draft_response.json()
     assert draft["rules"]
+    assert draft["extraction_summary"]["structured_rules"] == len(draft["rules"])
+    assert "unsupported_requirements" in draft
 
     publish_response = client.post(f"/api/draft-rulesets/{draft['id']}/publish")
     assert publish_response.status_code == 200

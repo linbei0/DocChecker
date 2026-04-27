@@ -19,6 +19,23 @@ export const formatRuleSchema = z.object({
   enabled: z.boolean().optional(),
 })
 
+export const extractionSummarySchema = z.object({
+  total_requirements: z.number(),
+  structured_rules: z.number(),
+  unsupported_requirements: z.number(),
+  low_confidence_rules: z.number(),
+  supported_categories: z.array(z.string()),
+  unsupported_categories: z.array(z.string()),
+  uncovered_categories: z.array(z.string()),
+})
+
+export const unsupportedRequirementSchema = z.object({
+  category: z.string(),
+  excerpt: z.string(),
+  location: z.string().nullish(),
+  reason: z.string(),
+})
+
 export const ruleSetSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -38,6 +55,8 @@ export const draftRuleSetSchema = z.object({
   locale: z.string().optional(),
   rules: z.array(formatRuleSchema),
   parse_warnings: z.array(z.string()),
+  extraction_summary: extractionSummarySchema.optional(),
+  unsupported_requirements: z.array(unsupportedRequirementSchema).optional(),
   status: z.enum(['draft', 'published']),
   published_ruleset_id: z.string().nullish(),
   created_at: z.string(),
@@ -45,5 +64,7 @@ export const draftRuleSetSchema = z.object({
 })
 
 export type FormatRule = z.infer<typeof formatRuleSchema>
+export type ExtractionSummary = z.infer<typeof extractionSummarySchema>
+export type UnsupportedRequirement = z.infer<typeof unsupportedRequirementSchema>
 export type RuleSet = z.infer<typeof ruleSetSchema>
 export type DraftRuleSet = z.infer<typeof draftRuleSetSchema>
