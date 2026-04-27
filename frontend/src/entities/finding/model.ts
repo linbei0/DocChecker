@@ -4,6 +4,7 @@ export const checkFindingSchema = z.object({
   id: z.string(),
   rule_id: z.string(),
   checker_id: z.string().optional(),
+  category: z.string().nullish(),
   severity: z.enum(['blocker', 'major', 'minor', 'info']),
   location: z.object({
     section_path: z.string().nullish(),

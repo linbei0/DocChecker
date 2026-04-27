@@ -29,5 +29,21 @@ export const ruleSetSchema = z.object({
   created_at: z.string(),
 })
 
+export const draftRuleSetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  document_id: z.string(),
+  source_type: z.enum(['manual', 'requirement_doc', 'template']),
+  version: z.string(),
+  locale: z.string().optional(),
+  rules: z.array(formatRuleSchema),
+  parse_warnings: z.array(z.string()),
+  status: z.enum(['draft', 'published']),
+  published_ruleset_id: z.string().nullish(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+
 export type FormatRule = z.infer<typeof formatRuleSchema>
 export type RuleSet = z.infer<typeof ruleSetSchema>
+export type DraftRuleSet = z.infer<typeof draftRuleSetSchema>

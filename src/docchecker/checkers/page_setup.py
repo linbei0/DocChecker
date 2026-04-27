@@ -38,6 +38,7 @@ class PageSetupChecker:
             id=f"{rule.id}:section-{section_index}:{field}",
             rule_id=rule.id,
             checker_id=self.checker_id,
+            category=rule.category,
             severity=rule.severity,
             location=FindingLocation(area=f"section:{section_index}"),
             expected={field: expected},

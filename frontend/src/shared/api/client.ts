@@ -26,7 +26,7 @@ export async function apiRequest<T>(
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new ApiError('请求失败', response.status, payload)
+    throw new ApiError(errorMessage(payload, '请求失败'), response.status, payload)
   }
 
   return schema.parse(payload)
@@ -44,8 +44,20 @@ export async function apiUpload<T>(
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new ApiError('上传失败', response.status, payload)
+    throw new ApiError(errorMessage(payload, '上传失败'), response.status, payload)
   }
 
   return schema.parse(payload)
+}
+
+function errorMessage(payload: unknown, fallback: string): string {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'detail' in payload &&
+    typeof payload.detail === 'string'
+  ) {
+    return payload.detail
+  }
+  return fallback
 }

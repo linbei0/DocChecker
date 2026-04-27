@@ -51,7 +51,7 @@ export function ReportDetailPage() {
     if (!report) return []
     return report.findings.filter((f) => {
       const matchSeverity = activeSeverity === 'all' || f.severity === activeSeverity
-      const matchCategory = activeCategory === 'all' || f.rule_id.includes(activeCategory)
+      const matchCategory = activeCategory === 'all' || f.category === activeCategory
       return matchSeverity && matchCategory
     })
   }, [report, activeSeverity, activeCategory])

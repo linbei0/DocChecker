@@ -26,6 +26,7 @@ class CheckEngine:
                         id=f"{checker.checker_id}:checker_failed",
                         rule_id="__checker_execution__",
                         checker_id=checker.checker_id,
+                        category=None,
                         severity="blocker",
                         location=FindingLocation(area="checker"),
                         expected={"status": "checker_succeeded"},

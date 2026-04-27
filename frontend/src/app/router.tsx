@@ -6,6 +6,7 @@ import { ReportDetailPage } from '@/pages/report-detail/ReportDetailPage'
 import { TemplatesPage } from '@/pages/templates/TemplatesPage'
 import { HistoryPage } from '@/pages/history/HistoryPage'
 import { RouteErrorPage } from '@/pages/route-error/RouteErrorPage'
+import { CheckProgressPage } from '@/pages/check-progress/CheckProgressPage'
 
 export const router = createBrowserRouter([
   {
@@ -16,6 +17,7 @@ export const router = createBrowserRouter([
       { index: true, element: <CheckNewPage /> },
       { path: 'checks/new', element: <CheckNewPage /> },
       { path: 'checks/:taskId/rules', element: <RuleConfirmPage /> },
+      { path: 'checks/:taskId/progress', element: <CheckProgressPage /> },
       { path: 'reports/:reportId', element: <ReportDetailPage /> },
       { path: 'templates', element: <TemplatesPage /> },
       { path: 'history', element: <HistoryPage /> },

@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from docchecker.domain.enums import Certainty, Severity
+from docchecker.domain.enums import Certainty, RuleCategory, Severity
 
 
 class FindingLocation(BaseModel):
@@ -23,6 +23,7 @@ class CheckFinding(BaseModel):
     id: str
     rule_id: str
     checker_id: str
+    category: RuleCategory | None = None
     severity: Severity
     location: FindingLocation
     expected: dict[str, Any]

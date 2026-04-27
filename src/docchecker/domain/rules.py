@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from docchecker.domain.enums import RuleCategory, Severity, SourceType
+from docchecker.domain.enums import DraftRuleSetStatus, RuleCategory, Severity, SourceType
 
 
 class RuleTarget(BaseModel):
@@ -44,3 +44,20 @@ class RuleSet(BaseModel):
     locale: str = "zh-CN"
     rules: list[FormatRule] = Field(default_factory=list)
     created_at: str
+
+
+class DraftRuleSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    document_id: str
+    source_type: SourceType
+    version: str = "1.0.0"
+    locale: str = "zh-CN"
+    rules: list[FormatRule] = Field(default_factory=list)
+    parse_warnings: list[str] = Field(default_factory=list)
+    status: DraftRuleSetStatus = DraftRuleSetStatus.draft
+    published_ruleset_id: str | None = None
+    created_at: str
+    updated_at: str

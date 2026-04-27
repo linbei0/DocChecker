@@ -37,3 +37,8 @@ class TaskStatus(StrEnum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+
+
+class DraftRuleSetStatus(StrEnum):
+    draft = "draft"
+    published = "published"

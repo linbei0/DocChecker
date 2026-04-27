@@ -38,6 +38,7 @@ class ParagraphChecker:
             id=f"{rule.id}:paragraph-{paragraph.index}:{field}",
             rule_id=rule.id,
             checker_id=self.checker_id,
+            category=rule.category,
             severity=rule.severity,
             location=FindingLocation(paragraph_index=paragraph.index),
             expected={field: expected},

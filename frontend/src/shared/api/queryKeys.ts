@@ -7,6 +7,14 @@ export const queryKeys = {
     all: ['rulesets'] as const,
     detail: (id: string) => ['rulesets', id] as const,
   },
+  draftRulesets: {
+    all: ['draft-rulesets'] as const,
+    detail: (id: string) => ['draft-rulesets', id] as const,
+  },
+  checkTasks: {
+    all: ['check-tasks'] as const,
+    detail: (id: string) => ['check-tasks', id] as const,
+  },
   reports: {
     detail: (id: string) => ['reports', id] as const,
     export: (id: string, format: 'markdown') => ['reports', id, 'export', format] as const,
