@@ -8,6 +8,9 @@ export const checkFindingSchema = z.object({
   severity: z.enum(['blocker', 'major', 'minor', 'info']),
   location: z.object({
     section_path: z.string().nullish(),
+    display_path: z.string().nullish(),
+    paragraph_number: z.number().nullish(),
+    section_name: z.string().nullish(),
     paragraph_index: z.number().nullish(),
     table_index: z.number().nullish(),
     row_index: z.number().nullish(),
@@ -17,6 +20,8 @@ export const checkFindingSchema = z.object({
   }),
   expected: z.record(z.string(), z.unknown()),
   actual: z.record(z.string(), z.unknown()),
+  excerpt: z.string().nullish(),
+  context: z.record(z.string(), z.unknown()).optional().default({}),
   evidence: z.string(),
   suggestion: z.string(),
   certainty: z.enum(['certain', 'probable', 'unknown']).optional(),

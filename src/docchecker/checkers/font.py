@@ -1,7 +1,13 @@
 from docchecker.checkers.base import relevant_rules
+from docchecker.checkers.finding_context import (
+    paragraph_context,
+    paragraph_evidence,
+    paragraph_excerpt,
+    paragraph_location,
+)
 from docchecker.domain.document import DocumentModel, ParagraphNode
 from docchecker.domain.enums import Certainty, RuleCategory
-from docchecker.domain.findings import CheckFinding, FindingLocation
+from docchecker.domain.findings import CheckFinding
 from docchecker.domain.rules import FormatRule
 
 
@@ -18,15 +24,24 @@ class FontChecker:
                     if actual is None:
                         findings.append(
                             self._finding(
-                                rule, paragraph, field, expected, actual, Certainty.unknown
+                                document,
+                                rule,
+                                paragraph,
+                                field,
+                                expected,
+                                actual,
+                                Certainty.unknown,
                             )
                         )
                     elif not _matches(actual, expected, rule.tolerance.get(field, 0)):
-                        findings.append(self._finding(rule, paragraph, field, expected, actual))
+                        findings.append(
+                            self._finding(document, rule, paragraph, field, expected, actual)
+                        )
         return findings
 
     def _finding(
         self,
+        document: DocumentModel,
         rule: FormatRule,
         paragraph: ParagraphNode,
         field: str,
@@ -40,10 +55,20 @@ class FontChecker:
             checker_id=self.checker_id,
             category=rule.category,
             severity=rule.severity,
-            location=FindingLocation(paragraph_index=paragraph.index),
+            location=paragraph_location(paragraph),
             expected={field: expected},
             actual={field: actual},
-            evidence=f"第 {paragraph.index + 1} 段字体字段 {field} 与规则不一致。",
+            excerpt=paragraph_excerpt(paragraph.text),
+            context=paragraph_context(
+                document, paragraph, field, expected=expected, actual=actual
+            ),
+            evidence=paragraph_evidence(
+                paragraph,
+                field,
+                expected=expected,
+                actual=actual,
+                checker_label="字体字段",
+            ),
             suggestion="请调整该段字体、字号或加粗设置，或清除直接格式后应用目标样式。",
             certainty=certainty,
         )

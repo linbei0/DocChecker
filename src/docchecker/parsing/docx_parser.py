@@ -76,13 +76,18 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
     ]
 
     paragraphs: list[ParagraphNode] = []
+    current_section_name: str | None = None
     for index, paragraph in enumerate(document.paragraphs):
         fmt = paragraph.paragraph_format
+        style_name = paragraph.style.name if paragraph.style else None
+        text = paragraph.text
+        if _is_heading_style(style_name) and text.strip():
+            current_section_name = _compact_text(text, max_length=40)
         paragraphs.append(
             ParagraphNode(
                 index=index,
-                text=paragraph.text,
-                style_name=paragraph.style.name if paragraph.style else None,
+                text=text,
+                style_name=style_name,
                 font_family=_font_family(paragraph),
                 font_size_pt=_font_size_pt(paragraph),
                 bold=_bold(paragraph),
@@ -91,6 +96,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
                 line_spacing=fmt.line_spacing if isinstance(fmt.line_spacing, float) else None,
                 space_before_pt=fmt.space_before.pt if fmt.space_before else None,
                 space_after_pt=fmt.space_after.pt if fmt.space_after else None,
+                raw={"section_name": current_section_name} if current_section_name else {},
             )
         )
 
@@ -122,3 +128,17 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
 def _base_style_name(style) -> str | None:
     base_style = getattr(style, "base_style", None)
     return base_style.name if base_style else None
+
+
+def _is_heading_style(style_name: str | None) -> bool:
+    if not style_name:
+        return False
+    normalized = style_name.strip().lower()
+    return normalized.startswith("heading") or normalized.startswith("标题")
+
+
+def _compact_text(text: str, *, max_length: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return f"{normalized[: max_length - 1]}…"

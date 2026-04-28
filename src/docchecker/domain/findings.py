@@ -9,6 +9,9 @@ class FindingLocation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     section_path: str | None = None
+    display_path: str | None = None
+    paragraph_number: int | None = None
+    section_name: str | None = None
     paragraph_index: int | None = None
     table_index: int | None = None
     row_index: int | None = None
@@ -28,6 +31,8 @@ class CheckFinding(BaseModel):
     location: FindingLocation
     expected: dict[str, Any]
     actual: dict[str, Any]
+    excerpt: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
     evidence: str
     suggestion: str
     certainty: Certainty = Certainty.certain
