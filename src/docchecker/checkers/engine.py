@@ -2,6 +2,12 @@ from docchecker.checkers.base import Checker
 from docchecker.checkers.font import FontChecker
 from docchecker.checkers.page_setup import PageSetupChecker
 from docchecker.checkers.paragraph import ParagraphChecker
+from docchecker.checkers.semantic import (
+    CaptionChecker,
+    ReferenceChecker,
+    StructureChecker,
+    TocChecker,
+)
 from docchecker.domain.document import DocumentModel
 from docchecker.domain.findings import CheckFinding, FindingLocation
 from docchecker.domain.rules import FormatRule
@@ -13,7 +19,15 @@ class CheckExecutionError(RuntimeError):
 
 class CheckEngine:
     def __init__(self, checkers: list[Checker] | None = None) -> None:
-        self.checkers = checkers or [PageSetupChecker(), FontChecker(), ParagraphChecker()]
+        self.checkers = checkers or [
+            PageSetupChecker(),
+            FontChecker(),
+            ParagraphChecker(),
+            StructureChecker(),
+            TocChecker(),
+            CaptionChecker(),
+            ReferenceChecker(),
+        ]
 
     def run(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
         findings: list[CheckFinding] = []

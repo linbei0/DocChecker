@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     storage_dir: Path = Field(default=Path("storage"))
     max_document_size_bytes: int = 30 * 1024 * 1024
     max_requirement_size_bytes: int = 20 * 1024 * 1024
+    rule_extractor_mode: Literal["local", "hybrid"] = "local"
+    llm_api_base: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
     task_execution_mode: Literal["inline", "rq"] = "inline"
     redis_url: str = "redis://localhost:6379/0"
 

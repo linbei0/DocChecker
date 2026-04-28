@@ -124,3 +124,46 @@ def test_markdown_report_includes_fragment_context(tmp_path: Path) -> None:
     assert "正文内容" in content
     assert "期望值：fontFamilyEastAsia=宋体" in content
     assert "实际值：fontFamilyEastAsia=Arial" in content
+
+
+def test_semantic_checkers_report_structure_and_reference_findings(tmp_path: Path) -> None:
+    path = tmp_path / "paper.docx"
+    document = Document()
+    document.add_paragraph("摘要")
+    document.add_paragraph("正文内容")
+    document.add_paragraph("[2] 不连续编号参考文献")
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="paper.docx")
+    ruleset = RuleSet(
+        id="ruleset_semantic",
+        name="语义规则",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="structure_required_sections",
+                category=RuleCategory.structure,
+                target=RuleTarget(scope="document.structure", selector="论文结构"),
+                expectation={"requiredSections": ["摘要", "目录", "正文"]},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="论文应包含摘要、目录、正文"),
+                confidence=1,
+            ),
+            FormatRule(
+                id="reference_basic_entries",
+                category=RuleCategory.reference,
+                target=RuleTarget(scope="document.references", selector="参考文献"),
+                expectation={"requiresReferences": True, "numbering": "bracketed"},
+                severity=Severity.minor,
+                source=RuleSource(type=SourceType.manual, excerpt="参考文献按编号排列"),
+                confidence=1,
+            ),
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+    rule_ids = {finding.rule_id for finding in findings}
+
+    assert "structure_required_sections" in rule_ids
+    assert "reference_basic_entries" in rule_ids

@@ -11,3 +11,4 @@ htmlcov/
 skills-lock.json
 docs/
 images/
+.env

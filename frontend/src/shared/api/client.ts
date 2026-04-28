@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { env } from '../config/env'
 
-const REQUEST_TIMEOUT_MS = 10000
+const REQUEST_TIMEOUT_MS = 120000
 const UPLOAD_TIMEOUT_MS = 30000
 
 export class ApiError extends Error {

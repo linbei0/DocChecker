@@ -153,6 +153,11 @@ export function RuleConfirmPage() {
                 <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                   <span className="font-medium text-neutral-700">{item.category}</span>
                   {item.location && <span>{item.location}</span>}
+                  {item.reason_code && (
+                    <span className="rounded-full bg-warning-50 px-2 py-0.5 text-warning-700">
+                      {reasonCodeLabel(item.reason_code)}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-1 text-sm text-neutral-700">{item.excerpt}</p>
                 <p className="mt-1 text-xs text-warning-700">{item.reason}</p>
@@ -269,6 +274,18 @@ function SummaryMetric({
       <p className="text-xs text-neutral-500">{label}</p>
       <p className={cn('mt-1 text-2xl font-semibold', toneClass)}>{value}</p>
     </div>
+  )
+}
+
+function reasonCodeLabel(code: string) {
+  return (
+    {
+      missing_checker: '缺少检查器',
+      ambiguous_requirement: '语义不明确',
+      out_of_scope: '超出范围',
+      llm_not_configured: 'LLM 未配置',
+      invalid_llm_response: 'LLM 响应无效',
+    }[code] || code
   )
 }
 

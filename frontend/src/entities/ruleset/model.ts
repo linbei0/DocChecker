@@ -34,6 +34,47 @@ export const unsupportedRequirementSchema = z.object({
   excerpt: z.string(),
   location: z.string().nullish(),
   reason: z.string(),
+  reason_code: z
+    .enum([
+      'missing_checker',
+      'ambiguous_requirement',
+      'out_of_scope',
+      'llm_not_configured',
+      'invalid_llm_response',
+    ])
+    .optional(),
+})
+
+export const extractedRuleCandidateSchema = z.object({
+  category: z.string(),
+  target_scope: z.string(),
+  selector: z.string().nullish(),
+  expectation: z.record(z.string(), z.unknown()),
+  evidence_span: z.string(),
+  location: z.string().nullish(),
+  checkability: z.enum(['checkable', 'needs_confirmation', 'unsupported']),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().nullish(),
+})
+
+export const ruleExtractionIssueSchema = z.object({
+  location: z.string().nullish(),
+  category: z.string().nullish(),
+  reason_code: z.enum([
+    'missing_checker',
+    'ambiguous_requirement',
+    'out_of_scope',
+    'llm_not_configured',
+    'invalid_llm_response',
+  ]),
+  message: z.string(),
+  excerpt: z.string().nullish(),
+})
+
+export const ruleExtractionTraceSchema = z.object({
+  mode: z.string(),
+  candidates: z.array(extractedRuleCandidateSchema).optional(),
+  issues: z.array(ruleExtractionIssueSchema).optional(),
 })
 
 export const ruleSetSchema = z.object({
@@ -57,6 +98,7 @@ export const draftRuleSetSchema = z.object({
   parse_warnings: z.array(z.string()),
   extraction_summary: extractionSummarySchema.optional(),
   unsupported_requirements: z.array(unsupportedRequirementSchema).optional(),
+  extraction_trace: ruleExtractionTraceSchema.nullish(),
   status: z.enum(['draft', 'published']),
   published_ruleset_id: z.string().nullish(),
   created_at: z.string(),
@@ -66,5 +108,8 @@ export const draftRuleSetSchema = z.object({
 export type FormatRule = z.infer<typeof formatRuleSchema>
 export type ExtractionSummary = z.infer<typeof extractionSummarySchema>
 export type UnsupportedRequirement = z.infer<typeof unsupportedRequirementSchema>
+export type ExtractedRuleCandidate = z.infer<typeof extractedRuleCandidateSchema>
+export type RuleExtractionIssue = z.infer<typeof ruleExtractionIssueSchema>
+export type RuleExtractionTrace = z.infer<typeof ruleExtractionTraceSchema>
 export type RuleSet = z.infer<typeof ruleSetSchema>
 export type DraftRuleSet = z.infer<typeof draftRuleSetSchema>

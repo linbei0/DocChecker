@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from docchecker.core.config import get_settings
 from docchecker.domain.enums import DraftRuleSetStatus, SourceType, TaskStatus
 from docchecker.domain.findings import CheckReport
-from docchecker.domain.requirements import RequirementDocument
+from docchecker.domain.requirements import RequirementDocument, RequirementDocumentModel
 from docchecker.domain.rules import (
     DraftRuleSet,
     ExtractionSummary,
@@ -22,8 +22,12 @@ from docchecker.domain.tasks import CheckTask
 from docchecker.services.check_service import CheckService
 from docchecker.services.docx_validator import DocumentValidationError, validate_docx_path
 from docchecker.services.file_storage import LocalFileStorage
-from docchecker.services.requirement_parser import extract_requirement_text
-from docchecker.services.rule_extractor import extract_rules_from_text
+from docchecker.services.requirement_parser import parse_requirement_document
+from docchecker.services.rule_extractor import (
+    RuleExtractionConfigurationError,
+    extract_rules_from_requirement_document,
+    extract_rules_from_text,
+)
 
 app = FastAPI(title="DocChecker API", version="0.1.0")
 settings = get_settings()
@@ -112,7 +116,10 @@ async def upload_requirement_document(file: UploadDocxFile) -> RequirementDocume
     stored = await storage.save_upload(file)
     try:
         validate_docx_path(stored.path, max_size_bytes=settings.max_requirement_size_bytes)
-        extracted_text = extract_requirement_text(stored.path)
+        parsed_requirement = parse_requirement_document(stored.path)
+        extracted_text = "\n".join(
+            f"{block.location}\t{block.text}" for block in parsed_requirement.blocks if block.text
+        )
     except DocumentValidationError as exc:
         stored.path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -122,6 +129,7 @@ async def upload_requirement_document(file: UploadDocxFile) -> RequirementDocume
         path=str(stored.path),
         size_bytes=stored.path.stat().st_size,
         extracted_text=extracted_text,
+        blocks=parsed_requirement.blocks,
         created_at=_now(),
     )
     REQUIREMENT_DOCUMENTS[requirement_document.id] = requirement_document
@@ -161,11 +169,25 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
             if not requirement_document:
                 raise HTTPException(status_code=404, detail="规范文档不存在。")
             text = requirement_document.extracted_text
-        result = extract_rules_from_text(text, source_type=request.source_type)
+        try:
+            if request.source_type == SourceType.requirement_doc:
+                result = extract_rules_from_requirement_document(
+                    RequirementDocumentModel(
+                        source_filename=requirement_document.filename,
+                        blocks=requirement_document.blocks,
+                        markdown=requirement_document.extracted_text,
+                    ),
+                    source_type=request.source_type,
+                )
+            else:
+                result = extract_rules_from_text(text, source_type=request.source_type)
+        except RuleExtractionConfigurationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         rules = result.rules
         warnings = result.parse_warnings
         extraction_summary = result.extraction_summary
         unsupported_requirements = result.unsupported_requirements
+        extraction_trace = result.extraction_trace
         name = "候选规则集"
 
     draft = DraftRuleSet(
@@ -177,6 +199,7 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         parse_warnings=warnings,
         extraction_summary=extraction_summary,
         unsupported_requirements=unsupported_requirements,
+        extraction_trace=extraction_trace if request.source_type != SourceType.template else None,
         created_at=now,
         updated_at=now,
     )
