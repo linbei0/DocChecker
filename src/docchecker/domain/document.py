@@ -33,6 +33,8 @@ class ParagraphNode(BaseModel):
     style_name: str | None = None
     section_index: int = 0
     font_family: str | None = None
+    font_family_east_asia: str | None = None
+    font_family_ascii: str | None = None
     font_size_pt: float | None = None
     bold: bool | None = None
     alignment: str | None = None

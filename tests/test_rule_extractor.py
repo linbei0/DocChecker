@@ -138,10 +138,10 @@ def test_hybrid_mode_accepts_schema_compliant_llm_candidates(
             "rule_candidates": [
                 {
                     "category": "structure",
-                    "target_scope": "abstract",
-                    "selector": "中文摘要",
-                    "expectation": {"approxWordCount": 300},
-                    "evidence_span": "中文摘要要求300字左右。",
+                    "target_scope": "document.structure",
+                    "selector": "论文结构",
+                    "expectation": {"requiredSections": ["中文摘要", "正文"]},
+                    "evidence_span": "论文应包括中文摘要和正文。",
                     "location": "paragraph:42",
                     "checkability": "checkable",
                     "confidence": 0.8,
@@ -193,6 +193,35 @@ def test_hybrid_mode_rejects_invalid_llm_candidate_schema(
     assert issue.excerpt is not None
     assert "abstract_word_count" in issue.excerpt
     assert "validation errors" not in issue.message
+
+
+def test_hybrid_mode_drops_unsupported_llm_expectation_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "heading",
+                    "target_scope": "heading.level1",
+                    "selector": "一级标题",
+                    "expectation": {
+                        "fontSizePt": 12,
+                        "spaceBetweenNumberAndTitle": True,
+                    },
+                    "evidence_span": "一级标题字号12，序号和标题之间空1格。",
+                    "location": "paragraph:1",
+                    "checkability": "checkable",
+                    "confidence": 0.8,
+                }
+            ]
+        },
+    )
+
+    rule = next(rule for rule in result.rules if rule.id == "heading_candidate")
+
+    assert rule.expectation == {"fontSizePt": 12}
 
 
 def _extract_with_mocked_llm(

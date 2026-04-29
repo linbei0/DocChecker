@@ -20,7 +20,7 @@ class ParagraphChecker:
         for rule in relevant_rules(rules, self.supported_categories):
             for paragraph in _matching_paragraphs(document, rule):
                 for field, expected in rule.expectation.items():
-                    actual = getattr(paragraph, _field_name(field), None)
+                    actual = _actual_value(paragraph, field, expected)
                     if actual is None:
                         findings.append(
                             self._finding(
@@ -76,13 +76,31 @@ class ParagraphChecker:
 
 def _matching_paragraphs(document: DocumentModel, rule: FormatRule) -> list[ParagraphNode]:
     selector = rule.target.selector
+    paragraphs = [p for p in document.paragraphs if p.text.strip()]
+    if rule.target.scope.startswith("heading"):
+        heading_paragraphs = [
+            p
+            for p in paragraphs
+            if (p.style_name or "").lower().startswith("heading")
+        ]
+        if not selector:
+            return heading_paragraphs
+        selected = [
+            p
+            for p in heading_paragraphs
+            if p.style_name == selector or p.text.strip() == selector
+        ]
+        return selected or heading_paragraphs
+    paragraphs = [
+        p for p in paragraphs if not (p.style_name or "").lower().startswith("heading")
+    ]
     if selector:
         return [
             p
-            for p in document.paragraphs
-            if p.text.strip() and (p.style_name == selector or selector in p.text)
+            for p in paragraphs
+            if p.style_name == selector or selector in p.text
         ]
-    return [p for p in document.paragraphs if p.text.strip()]
+    return paragraphs
 
 
 def _field_name(field: str) -> str:
@@ -94,6 +112,35 @@ def _field_name(field: str) -> str:
         "fontFamilyEastAsia": "font_family",
         "fontSizePt": "font_size_pt",
     }.get(field, field)
+
+
+def _actual_value(paragraph: ParagraphNode, field: str, expected):
+    if field == "fontFamilyEastAsia":
+        if isinstance(expected, str) and _is_latin_font(expected):
+            return (
+                paragraph.font_family_ascii
+                or _mixed_font_value(paragraph.raw.get("font_family_ascii_values"))
+                or paragraph.font_family
+            )
+        return (
+            paragraph.font_family_east_asia
+            or _mixed_font_value(paragraph.raw.get("font_family_east_asia_values"))
+            or paragraph.font_family
+        )
+    return getattr(paragraph, _field_name(field), None)
+
+
+def _mixed_font_value(values) -> str | None:
+    if not isinstance(values, list):
+        return None
+    names = [str(value) for value in values if value]
+    if len(names) <= 1:
+        return names[0] if names else None
+    return "混合：" + "、".join(names)
+
+
+def _is_latin_font(value: str) -> bool:
+    return value.lower() in {"times new roman", "arial", "calibri", "cambria"}
 
 
 def _matches(actual, expected, tolerance) -> bool:

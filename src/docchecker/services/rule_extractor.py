@@ -70,6 +70,38 @@ CHECKABLE_CATEGORIES = {
     RuleCategory.structure,
     RuleCategory.toc,
 }
+CHECKABLE_EXPECTATION_FIELDS = {
+    RuleCategory.font: {"fontFamilyEastAsia", "fontSizePt", "bold"},
+    RuleCategory.paragraph: {
+        "alignment",
+        "firstLineIndentCm",
+        "lineSpacing",
+        "spaceBeforePt",
+        "spaceAfterPt",
+        "fontFamilyEastAsia",
+        "fontSizePt",
+    },
+    RuleCategory.heading: {
+        "fontFamilyEastAsia",
+        "fontSizePt",
+        "bold",
+        "alignment",
+        "spaceBeforePt",
+        "spaceAfterPt",
+    },
+    RuleCategory.page: {
+        "page_width_cm",
+        "page_height_cm",
+        "margin_top_cm",
+        "margin_bottom_cm",
+        "margin_left_cm",
+        "margin_right_cm",
+    },
+    RuleCategory.caption: {"captionPattern"},
+    RuleCategory.reference: {"requiresReferences", "numbering"},
+    RuleCategory.structure: {"requiredSections"},
+    RuleCategory.toc: {"requiresToc", "requiresEntries"},
+}
 UNSUPPORTED_CATEGORY_KEYWORDS = {
     RuleCategory.header_footer: ["页眉", "页脚"],
 }
@@ -565,6 +597,9 @@ def _rules_from_candidates(
     for candidate in candidates:
         if candidate.checkability != "checkable":
             continue
+        expectation = _checkable_expectation(candidate)
+        if not expectation:
+            continue
         rule_id = _candidate_rule_id(candidate)
         rules.append(
             _rule(
@@ -572,7 +607,7 @@ def _rules_from_candidates(
                 candidate.category,
                 candidate.target_scope,
                 candidate.selector,
-                candidate.expectation,
+                expectation,
                 RequirementChunk(text=candidate.evidence_span, location=candidate.location),
                 source_type,
                 Severity.major if candidate.category == RuleCategory.structure else Severity.minor,
@@ -580,6 +615,15 @@ def _rules_from_candidates(
             )
         )
     return rules
+
+
+def _checkable_expectation(candidate: ExtractedRuleCandidate) -> dict[str, object]:
+    allowed_fields = CHECKABLE_EXPECTATION_FIELDS.get(candidate.category, set())
+    return {
+        field: value
+        for field, value in candidate.expectation.items()
+        if field in allowed_fields
+    }
 
 
 def _candidate_rule_id(candidate: ExtractedRuleCandidate) -> str:

@@ -23,7 +23,8 @@ class StructureChecker:
             missing = [
                 section
                 for section in required
-                if isinstance(section, str) and section not in text
+                if isinstance(section, str)
+                and _section_index(section, text, paragraphs) is None
             ]
             if missing:
                 findings.append(
@@ -34,10 +35,11 @@ class StructureChecker:
                         {"missingSections": missing},
                         f"论文缺少必要结构：{', '.join(missing)}。",
                         "请补齐缺失的论文结构，或在规则确认页关闭不适用的结构规则。",
+                        excerpt=_document_excerpt(paragraphs),
                     )
                 )
                 continue
-            order_problem = _first_order_problem(required, text)
+            order_problem = _first_order_problem(required, text, paragraphs)
             if order_problem:
                 findings.append(
                     _document_finding(
@@ -47,6 +49,7 @@ class StructureChecker:
                         {"outOfOrder": order_problem},
                         f"论文结构顺序不符合规则：{order_problem}。",
                         "请按规则要求调整论文组成部分的先后顺序。",
+                        excerpt=_document_excerpt(paragraphs),
                     )
                 )
         return findings
@@ -183,18 +186,108 @@ def _nonempty_paragraphs(document: DocumentModel) -> list[ParagraphNode]:
     return [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
 
 
-def _first_order_problem(required: Iterable[object], text: str) -> str | None:
+SECTION_ALIASES = {
+    "中文摘要": ["中文摘要", "摘要", "摘 要"],
+    "中文关键词": ["中文关键词", "关键词", "关键字"],
+    "英文摘要": ["英文摘要", "Abstract"],
+    "英文关键词": ["英文关键词", "Keywords", "Key words"],
+    "目录": ["目录", "目 录", "目  录"],
+    "正文": ["正文"],
+}
+
+
+def _first_order_problem(
+    required: Iterable[object],
+    text: str,
+    paragraphs: list[ParagraphNode],
+) -> str | None:
     last_index = -1
     last_section = ""
     for section in required:
         if not isinstance(section, str):
             continue
-        index = text.find(section)
+        index = _section_index(section, text, paragraphs)
+        if index is None:
+            continue
         if index < last_index:
             return f"{section} 出现在 {last_section} 之前"
         last_index = index
         last_section = section
     return None
+
+
+def _section_index(
+    section: str,
+    text: str,
+    paragraphs: list[ParagraphNode],
+) -> int | None:
+    if section == "正文" and _has_body_content(paragraphs):
+        first_heading = next(
+            (
+                paragraph
+                for paragraph in paragraphs
+                if _is_heading_paragraph(paragraph) and not _is_toc_paragraph(paragraph)
+            ),
+            None,
+        )
+        return first_heading.index if first_heading else 0
+
+    matches = [
+        paragraph.index
+        for paragraph in paragraphs
+        if _paragraph_matches_section(paragraph, section)
+    ]
+    return min(matches) if matches else None
+
+
+def _paragraph_matches_section(paragraph: ParagraphNode, section: str) -> bool:
+    if _is_toc_paragraph(paragraph) and section != "目录":
+        return False
+    paragraph_text = _normalize_text(paragraph.text)
+    if not paragraph_text:
+        return False
+    for alias in SECTION_ALIASES.get(section, [section]):
+        alias_text = _normalize_text(alias)
+        if not alias_text:
+            continue
+        if _is_heading_paragraph(paragraph) or section in {"致谢", "参考文献", "目录"}:
+            if paragraph_text == alias_text or paragraph_text.startswith(alias_text):
+                return True
+            continue
+        if paragraph_text.startswith(alias_text):
+            return True
+    return False
+
+
+def _has_body_content(paragraphs: list[ParagraphNode]) -> bool:
+    return any(_is_heading_paragraph(paragraph) for paragraph in paragraphs)
+
+
+def _is_heading_paragraph(paragraph: ParagraphNode) -> bool:
+    style_name = (paragraph.style_name or "").lower()
+    return style_name.startswith("heading")
+
+
+def _is_toc_paragraph(paragraph: ParagraphNode) -> bool:
+    style_name = (paragraph.style_name or "").lower()
+    return style_name.startswith("toc") or "目录" in style_name
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[\s　:：]+", "", value).lower()
+
+
+def _document_excerpt(paragraphs: list[ParagraphNode]) -> str | None:
+    snippets = [
+        paragraph.text.strip()
+        for paragraph in paragraphs
+        if paragraph.text.strip() and (_is_heading_paragraph(paragraph) or len(paragraph.text) <= 80)
+    ]
+    if not snippets:
+        snippets = [paragraph.text.strip() for paragraph in paragraphs if paragraph.text.strip()]
+    if not snippets:
+        return None
+    return "；".join(snippets[:8])[:300]
 
 
 def _reference_number(text: str) -> int | None:
@@ -209,6 +302,7 @@ def _document_finding(
     actual: dict[str, object],
     evidence: str,
     suggestion: str,
+    excerpt: str | None = None,
 ) -> CheckFinding:
     return CheckFinding(
         id=f"{rule.id}:document",
@@ -219,6 +313,7 @@ def _document_finding(
         location=FindingLocation(area="document", display_path="整篇文档"),
         expected=expected,
         actual=actual,
+        excerpt=excerpt,
         evidence=evidence,
         suggestion=suggestion,
     )
