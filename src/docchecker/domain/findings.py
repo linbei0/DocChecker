@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,9 @@ class CheckFinding(BaseModel):
     evidence: str
     suggestion: str
     certainty: Certainty = Certainty.certain
+    status: Literal["missing_actual", "mixed_value", "unsupported_field", "mismatch"] = (
+        "mismatch"
+    )
 
 
 class CheckReport(BaseModel):

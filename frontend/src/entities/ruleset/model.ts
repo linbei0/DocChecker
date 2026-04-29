@@ -1,5 +1,14 @@
 import { z } from 'zod'
 
+const ruleExtractionReasonCodeSchema = z.enum([
+  'missing_checker',
+  'ambiguous_requirement',
+  'out_of_scope',
+  'llm_not_configured',
+  'invalid_llm_response',
+  'unsupported_field',
+])
+
 export const formatRuleSchema = z.object({
   id: z.string(),
   category: z.string(),
@@ -34,15 +43,7 @@ export const unsupportedRequirementSchema = z.object({
   excerpt: z.string(),
   location: z.string().nullish(),
   reason: z.string(),
-  reason_code: z
-    .enum([
-      'missing_checker',
-      'ambiguous_requirement',
-      'out_of_scope',
-      'llm_not_configured',
-      'invalid_llm_response',
-    ])
-    .optional(),
+  reason_code: ruleExtractionReasonCodeSchema.optional(),
 })
 
 export const extractedRuleCandidateSchema = z.object({
@@ -60,13 +61,7 @@ export const extractedRuleCandidateSchema = z.object({
 export const ruleExtractionIssueSchema = z.object({
   location: z.string().nullish(),
   category: z.string().nullish(),
-  reason_code: z.enum([
-    'missing_checker',
-    'ambiguous_requirement',
-    'out_of_scope',
-    'llm_not_configured',
-    'invalid_llm_response',
-  ]),
+  reason_code: ruleExtractionReasonCodeSchema,
   message: z.string(),
   excerpt: z.string().nullish(),
 })

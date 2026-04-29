@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from docchecker.core.config import get_settings
 from docchecker.domain.enums import SourceType
 from docchecker.services.rule_extractor import (
     RuleExtractionConfigurationError,
@@ -9,7 +10,9 @@ from docchecker.services.rule_extractor import (
 )
 
 
-def test_extract_rules_from_manual_text() -> None:
+def test_extract_rules_from_manual_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
     result = extract_rules_from_text(
         "正文宋体小四，1.5倍行距，首行缩进2字符，页边距上下2.5cm。",
         source_type=SourceType.manual,
@@ -61,7 +64,11 @@ def test_extract_rules_keeps_requirement_locations() -> None:
     assert left_margin.expectation["margin_left_cm"] == 3
 
 
-def test_extract_rules_maps_semantic_requirements_to_checkable_rules() -> None:
+def test_extract_rules_maps_semantic_requirements_to_checkable_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
     result = extract_rules_from_text(
         "参考文献按 GB/T 7714 编排。\n目录自动生成，列至三级标题。",
         source_type=SourceType.requirement_doc,
@@ -222,6 +229,15 @@ def test_hybrid_mode_drops_unsupported_llm_expectation_fields(
     rule = next(rule for rule in result.rules if rule.id == "heading_candidate")
 
     assert rule.expectation == {"fontSizePt": 12}
+    assert any(
+        issue.reason_code == "unsupported_field"
+        and "spaceBetweenNumberAndTitle" in issue.message
+        for issue in result.extraction_trace.issues
+    )
+    assert any(
+        item.reason_code == "unsupported_field"
+        for item in result.unsupported_requirements
+    )
 
 
 def _extract_with_mocked_llm(

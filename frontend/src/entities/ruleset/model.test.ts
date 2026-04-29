@@ -28,7 +28,27 @@ describe('draftRuleSetSchema', () => {
           location: 'paragraph:4',
           reason: '当前缺少对应检查器。',
         },
+        {
+          category: 'heading',
+          excerpt: '一级标题序号和标题之间空1格。',
+          location: 'paragraph:5',
+          reason: '规则候选包含当前检查器不支持的字段：spaceBetweenNumberAndTitle',
+          reason_code: 'unsupported_field',
+        },
       ],
+      extraction_trace: {
+        mode: 'hybrid',
+        candidates: [],
+        issues: [
+          {
+            location: 'paragraph:5',
+            category: 'heading',
+            reason_code: 'unsupported_field',
+            message: '规则候选包含当前检查器不支持的字段：spaceBetweenNumberAndTitle',
+            excerpt: '一级标题序号和标题之间空1格。',
+          },
+        ],
+      },
       status: 'draft',
       published_ruleset_id: null,
       created_at: '2026-04-27T00:00:00+08:00',

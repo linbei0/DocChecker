@@ -94,6 +94,9 @@ def test_parse_docx_tracks_mixed_script_fonts_separately(tmp_path: Path) -> None
     assert paragraph_node.font_family is None
     assert paragraph_node.font_family_east_asia == "宋体"
     assert paragraph_node.font_family_ascii == "Times New Roman"
+    assert [run.script for run in paragraph_node.runs] == ["east_asia", "ascii"]
+    assert paragraph_node.runs[0].font_family_east_asia == "宋体"
+    assert paragraph_node.runs[1].font_family_ascii == "Times New Roman"
 
 
 def test_font_checker_reports_mixed_east_asia_fonts_instead_of_unparsed(
@@ -147,6 +150,8 @@ def test_parse_docx_tracks_nearest_heading_as_logical_section(tmp_path: Path) ->
 
     assert model.paragraphs[0].raw["section_name"] == "绪论"
     assert model.paragraphs[1].raw["section_name"] == "绪论"
+    assert model.logical_sections[0].role == "body"
+    assert model.logical_sections[0].start_paragraph_index == 0
 
 
 def test_engine_reports_font_mismatch(tmp_path: Path) -> None:
@@ -350,6 +355,15 @@ def test_structure_checker_ignores_toc_entries_for_order(tmp_path: Path) -> None
     document.add_paragraph("参考文献")
     document.save(path)
     model = parse_docx(path, document_id="doc_1", source_filename="paper-toc-order.docx")
+    roles = [section.role for section in model.logical_sections]
+    assert roles == [
+        "abstract",
+        "keywords",
+        "toc",
+        "body",
+        "acknowledgements",
+        "references",
+    ]
     ruleset = RuleSet(
         id="ruleset_structure_order",
         name="结构顺序规则",

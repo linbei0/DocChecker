@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -5,7 +6,14 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
-from docchecker.domain.document import DocumentModel, ParagraphNode, ParseWarning, SectionNode
+from docchecker.domain.document import (
+    DocumentModel,
+    LogicalSectionNode,
+    ParagraphNode,
+    ParseWarning,
+    RunSpan,
+    SectionNode,
+)
 
 EMU_PER_CM = 360000
 PT_PER_TWIP = 1 / 20
@@ -181,6 +189,44 @@ def _run_contains_script(text: str, script: str) -> bool:
     return False
 
 
+def _run_script(text: str) -> str:
+    has_east_asia = _run_contains_script(text, "east_asia")
+    has_ascii = _run_contains_script(text, "ascii")
+    if has_east_asia and has_ascii:
+        return "mixed"
+    if has_east_asia:
+        return "east_asia"
+    if has_ascii:
+        return "ascii"
+    return "other"
+
+
+def _run_spans(paragraph, default_font_name: str | None) -> list[RunSpan]:
+    spans: list[RunSpan] = []
+    for run in paragraph.runs:
+        if not run.text:
+            continue
+        script = _run_script(run.text)
+        font_family = _run_style_font_name(run, paragraph, default_font_name)
+        size = _run_style_font_value(run, paragraph, "size")
+        spans.append(
+            RunSpan(
+                text=run.text,
+                script=script,
+                font_family=font_family,
+                font_family_east_asia=(
+                    font_family if script in {"east_asia", "mixed"} else None
+                ),
+                font_family_ascii=font_family if script in {"ascii", "mixed"} else None,
+                font_size_pt=size.pt if size is not None else None,
+                bold=_run_style_bold(run, paragraph),
+                style_name=run.style.name if getattr(run, "style", None) else None,
+                source="resolved",
+            )
+        )
+    return spans
+
+
 def _bold(paragraph) -> bool | None:
     values = [
         value
@@ -253,6 +299,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
             default_font_name,
             script="ascii",
         )
+        runs = _run_spans(paragraph, default_font_name)
         paragraphs.append(
             ParagraphNode(
                 index=index,
@@ -278,6 +325,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
                 line_spacing=_line_spacing(paragraph),
                 space_before_pt=_space_pt(paragraph, "space_before"),
                 space_after_pt=_space_pt(paragraph, "space_after"),
+                runs=runs,
                 raw=raw,
             )
         )
@@ -299,6 +347,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
         source_filename=source_filename,
         package_parts=package_parts,
         sections=sections,
+        logical_sections=_build_logical_sections(paragraphs),
         paragraphs=paragraphs,
         table_count=len(document.tables),
         image_count=image_count,
@@ -324,3 +373,65 @@ def _compact_text(text: str, *, max_length: int) -> str:
     if len(normalized) <= max_length:
         return normalized
     return f"{normalized[: max_length - 1]}…"
+
+
+SECTION_ROLE_ALIASES = {
+    "abstract": ("中文摘要", "摘要", "摘 要", "abstract"),
+    "keywords": ("中文关键词", "关键词", "关键字", "keywords", "key words"),
+    "toc": ("目录", "目 录", "目  录"),
+    "body": ("正文",),
+    "acknowledgements": ("致谢", "致 谢", "谢辞"),
+    "references": ("参考文献", "references", "bibliography"),
+    "appendix": ("附录", "appendix"),
+}
+
+
+def _build_logical_sections(paragraphs: list[ParagraphNode]) -> list[LogicalSectionNode]:
+    sections: list[LogicalSectionNode] = []
+    for paragraph in paragraphs:
+        role = _section_role(paragraph)
+        if role is None:
+            continue
+        title = _compact_text(paragraph.text.strip(), max_length=80)
+        if sections and sections[-1].role == role:
+            continue
+        if sections and sections[-1].end_paragraph_index is None:
+            sections[-1].end_paragraph_index = paragraph.index - 1
+        sections.append(
+            LogicalSectionNode(
+                role=role,
+                title=title,
+                start_paragraph_index=paragraph.index,
+            )
+        )
+    if sections and sections[-1].end_paragraph_index is None:
+        sections[-1].end_paragraph_index = paragraphs[-1].index if paragraphs else 0
+    return sections
+
+
+def _section_role(paragraph: ParagraphNode) -> str | None:
+    text = paragraph.text.strip()
+    if not text or _is_toc_entry(paragraph):
+        return None
+    normalized = _normalize_section_text(text)
+    for role, aliases in SECTION_ROLE_ALIASES.items():
+        for alias in aliases:
+            alias_text = _normalize_section_text(alias)
+            if normalized == alias_text or normalized.startswith(alias_text):
+                return role
+    if _is_heading_style(paragraph.style_name):
+        return "body"
+    if re.match(r"^\d+(?:\.\d+){0,3}\s+\S{1,80}$", text):
+        return "body"
+    return None
+
+
+def _is_toc_entry(paragraph: ParagraphNode) -> bool:
+    style_name = (paragraph.style_name or "").lower()
+    if style_name.startswith("toc") or "目录" in style_name:
+        return _normalize_section_text(paragraph.text) != _normalize_section_text("目录")
+    return bool(re.match(r"^\d+(?:\.\d+){0,3}\s+.+\s+\d+$", paragraph.text.strip()))
+
+
+def _normalize_section_text(value: str) -> str:
+    return re.sub(r"[\s　:：]+", "", value).lower()

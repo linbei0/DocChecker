@@ -71,6 +71,7 @@ class FontChecker:
             ),
             suggestion="请调整该段字体、字号或加粗设置，或清除直接格式后应用目标样式。",
             certainty=certainty,
+            status=_finding_status(actual),
         )
 
 
@@ -132,6 +133,14 @@ def _mixed_font_value(values) -> str | None:
     if len(names) <= 1:
         return names[0] if names else None
     return "混合：" + "、".join(names)
+
+
+def _finding_status(actual) -> str:
+    if actual is None:
+        return "missing_actual"
+    if isinstance(actual, str) and actual.startswith("混合："):
+        return "mixed_value"
+    return "mismatch"
 
 
 def _is_latin_font(value: str) -> bool:

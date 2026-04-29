@@ -531,7 +531,24 @@ function IssueDetail({
         )}
       />
       <span className="line-clamp-2">{findingFieldLabel(finding)}</span>
+      {finding.status && finding.status !== 'mismatch' && (
+        <span className="shrink-0 rounded border border-neutral-300 px-1.5 py-0.5 text-xs text-neutral-600">
+          {findingStatusLabel(finding.status)}
+        </span>
+      )}
     </div>
+  )
+}
+
+function findingStatusLabel(status: FindingGroup['findings'][number]['status']) {
+  if (!status) return '不一致'
+  return (
+    {
+      missing_actual: '未解析',
+      mixed_value: '混合值',
+      unsupported_field: '暂不支持',
+      mismatch: '不一致',
+    }[status] || '不一致'
   )
 }
 

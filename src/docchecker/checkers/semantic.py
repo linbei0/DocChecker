@@ -24,7 +24,7 @@ class StructureChecker:
                 section
                 for section in required
                 if isinstance(section, str)
-                and _section_index(section, text, paragraphs) is None
+                and _section_index(section, document, text, paragraphs) is None
             ]
             if missing:
                 findings.append(
@@ -39,7 +39,7 @@ class StructureChecker:
                     )
                 )
                 continue
-            order_problem = _first_order_problem(required, text, paragraphs)
+            order_problem = _first_order_problem(required, document, text, paragraphs)
             if order_problem:
                 findings.append(
                     _document_finding(
@@ -195,9 +195,24 @@ SECTION_ALIASES = {
     "正文": ["正文"],
 }
 
+SECTION_ROLE_BY_REQUIREMENT = {
+    "中文摘要": "abstract",
+    "摘要": "abstract",
+    "英文摘要": "abstract",
+    "中文关键词": "keywords",
+    "关键词": "keywords",
+    "英文关键词": "keywords",
+    "目录": "toc",
+    "正文": "body",
+    "致谢": "acknowledgements",
+    "参考文献": "references",
+    "附录": "appendix",
+}
+
 
 def _first_order_problem(
     required: Iterable[object],
+    document: DocumentModel,
     text: str,
     paragraphs: list[ParagraphNode],
 ) -> str | None:
@@ -206,7 +221,7 @@ def _first_order_problem(
     for section in required:
         if not isinstance(section, str):
             continue
-        index = _section_index(section, text, paragraphs)
+        index = _section_index(section, document, text, paragraphs)
         if index is None:
             continue
         if index < last_index:
@@ -218,9 +233,20 @@ def _first_order_problem(
 
 def _section_index(
     section: str,
+    document: DocumentModel,
     text: str,
     paragraphs: list[ParagraphNode],
 ) -> int | None:
+    role = _section_role_for_requirement(section)
+    if role:
+        matches = [
+            item.start_paragraph_index
+            for item in document.logical_sections
+            if item.role == role
+        ]
+        if matches:
+            return min(matches)
+
     if section == "正文" and _has_body_content(paragraphs):
         first_heading = next(
             (
@@ -257,6 +283,14 @@ def _paragraph_matches_section(paragraph: ParagraphNode, section: str) -> bool:
         if paragraph_text.startswith(alias_text):
             return True
     return False
+
+
+def _section_role_for_requirement(section: str) -> str | None:
+    normalized = _normalize_text(section)
+    for name, role in SECTION_ROLE_BY_REQUIREMENT.items():
+        if normalized == _normalize_text(name):
+            return role
+    return None
 
 
 def _has_body_content(paragraphs: list[ParagraphNode]) -> bool:

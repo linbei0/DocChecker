@@ -50,6 +50,7 @@ RuleExtractionReasonCode = Literal[
     "missing_checker",
     "ambiguous_requirement",
     "out_of_scope",
+    "unsupported_field",
     "llm_not_configured",
     "invalid_llm_response",
 ]

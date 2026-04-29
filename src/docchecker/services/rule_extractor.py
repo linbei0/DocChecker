@@ -19,6 +19,7 @@ from docchecker.domain.rules import (
     RuleTarget,
     UnsupportedRequirement,
 )
+from docchecker.services.rule_compiler import compile_rule_candidates
 
 
 @dataclass(frozen=True)
@@ -60,48 +61,6 @@ FONT_SIZE_BY_NAME = {
 }
 
 ALL_RULE_CATEGORIES = list(RuleCategory)
-CHECKABLE_CATEGORIES = {
-    RuleCategory.page,
-    RuleCategory.font,
-    RuleCategory.paragraph,
-    RuleCategory.heading,
-    RuleCategory.caption,
-    RuleCategory.reference,
-    RuleCategory.structure,
-    RuleCategory.toc,
-}
-CHECKABLE_EXPECTATION_FIELDS = {
-    RuleCategory.font: {"fontFamilyEastAsia", "fontSizePt", "bold"},
-    RuleCategory.paragraph: {
-        "alignment",
-        "firstLineIndentCm",
-        "lineSpacing",
-        "spaceBeforePt",
-        "spaceAfterPt",
-        "fontFamilyEastAsia",
-        "fontSizePt",
-    },
-    RuleCategory.heading: {
-        "fontFamilyEastAsia",
-        "fontSizePt",
-        "bold",
-        "alignment",
-        "spaceBeforePt",
-        "spaceAfterPt",
-    },
-    RuleCategory.page: {
-        "page_width_cm",
-        "page_height_cm",
-        "margin_top_cm",
-        "margin_bottom_cm",
-        "margin_left_cm",
-        "margin_right_cm",
-    },
-    RuleCategory.caption: {"captionPattern"},
-    RuleCategory.reference: {"requiresReferences", "numbering"},
-    RuleCategory.structure: {"requiredSections"},
-    RuleCategory.toc: {"requiresToc", "requiresEntries"},
-}
 UNSUPPORTED_CATEGORY_KEYWORDS = {
     RuleCategory.header_footer: ["页眉", "页脚"],
 }
@@ -184,7 +143,9 @@ def _extract_rules_from_chunks(
     rules.extend(_extract_heading_rules(chunks, source_type))
     rules.extend(_extract_title_rules(chunks, source_type))
     rules.extend(_extract_named_font_rules(chunks, source_type))
-    rules.extend(_rules_from_candidates(candidates, source_type))
+    compilation = compile_rule_candidates(candidates, source_type=source_type)
+    rules.extend(compilation.rules)
+    issues.extend(compilation.issues)
 
     deduped_rules = _dedupe_rules(rules)
     unsupported = _extract_unsupported_requirements(chunks, deduped_rules, issues)
@@ -589,52 +550,6 @@ def _reference_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleC
     return []
 
 
-def _rules_from_candidates(
-    candidates: list[ExtractedRuleCandidate],
-    source_type: SourceType,
-) -> list[FormatRule]:
-    rules: list[FormatRule] = []
-    for candidate in candidates:
-        if candidate.checkability != "checkable":
-            continue
-        expectation = _checkable_expectation(candidate)
-        if not expectation:
-            continue
-        rule_id = _candidate_rule_id(candidate)
-        rules.append(
-            _rule(
-                rule_id,
-                candidate.category,
-                candidate.target_scope,
-                candidate.selector,
-                expectation,
-                RequirementChunk(text=candidate.evidence_span, location=candidate.location),
-                source_type,
-                Severity.major if candidate.category == RuleCategory.structure else Severity.minor,
-                confidence=candidate.confidence,
-            )
-        )
-    return rules
-
-
-def _checkable_expectation(candidate: ExtractedRuleCandidate) -> dict[str, object]:
-    allowed_fields = CHECKABLE_EXPECTATION_FIELDS.get(candidate.category, set())
-    return {
-        field: value
-        for field, value in candidate.expectation.items()
-        if field in allowed_fields
-    }
-
-
-def _candidate_rule_id(candidate: ExtractedRuleCandidate) -> str:
-    return {
-        RuleCategory.structure: "structure_required_sections",
-        RuleCategory.toc: "toc_basic_shape",
-        RuleCategory.caption: "caption_basic_pattern",
-        RuleCategory.reference: "reference_basic_entries",
-    }.get(candidate.category, f"{candidate.category.value}_candidate")
-
-
 def _llm_rule_candidates(
     blocks: list[RequirementBlock],
 ) -> tuple[list[ExtractedRuleCandidate], list[RuleExtractionIssue]]:
@@ -903,6 +818,8 @@ def _extract_unsupported_requirements(
                 )
                 break
     for issue in issues or []:
+        if issue.reason_code != "unsupported_field" and _issue_covered_by_rule(issue, rules):
+            continue
         unsupported.append(
             UnsupportedRequirement(
                 category=issue.category or RuleCategory.structure,
@@ -913,6 +830,18 @@ def _extract_unsupported_requirements(
             )
         )
     return _dedupe_unsupported(unsupported)
+
+
+def _issue_covered_by_rule(
+    issue: RuleExtractionIssue,
+    rules: list[FormatRule],
+) -> bool:
+    if issue.category is None or issue.excerpt is None:
+        return False
+    return any(
+        rule.category == issue.category and rule.source.excerpt == issue.excerpt[:300]
+        for rule in rules
+    )
 
 
 def _has_checkable_page_header_footer(chunk: RequirementChunk) -> bool:
