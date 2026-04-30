@@ -23,9 +23,26 @@ export const formatRuleSchema = z.object({
     type: z.enum(['manual', 'requirement_doc', 'template']),
     excerpt: z.string(),
     location: z.string().nullish(),
+    evidence_type: z
+      .enum([
+        'explicit_text',
+        'comment_anchor',
+        'exemplar_format',
+        'style_cluster',
+        'table_cell',
+        'llm_candidate',
+        'manual_text',
+        'template',
+      ])
+      .optional(),
+    evidence_label: z.string().nullish(),
   }),
   confidence: z.number().min(0).max(1).optional(),
   enabled: z.boolean().optional(),
+  capability_status: z
+    .enum(['auto_checkable', 'needs_confirmation', 'unsupported', 'conflict', 'parse_error'])
+    .optional(),
+  confirmation_required: z.boolean().optional(),
 })
 
 export const extractionSummarySchema = z.object({
@@ -36,6 +53,10 @@ export const extractionSummarySchema = z.object({
   supported_categories: z.array(z.string()),
   unsupported_categories: z.array(z.string()),
   uncovered_categories: z.array(z.string()),
+  auto_checkable_rules: z.number().optional(),
+  needs_confirmation_rules: z.number().optional(),
+  conflict_requirements: z.number().optional(),
+  coverage_rate: z.number().optional(),
 })
 
 export const unsupportedRequirementSchema = z.object({
@@ -44,6 +65,10 @@ export const unsupportedRequirementSchema = z.object({
   location: z.string().nullish(),
   reason: z.string(),
   reason_code: ruleExtractionReasonCodeSchema.optional(),
+  target_scope: z.string().nullish(),
+  capability_status: z
+    .enum(['auto_checkable', 'needs_confirmation', 'unsupported', 'conflict', 'parse_error'])
+    .optional(),
 })
 
 export const extractedRuleCandidateSchema = z.object({
@@ -56,6 +81,18 @@ export const extractedRuleCandidateSchema = z.object({
   checkability: z.enum(['checkable', 'needs_confirmation', 'unsupported']),
   confidence: z.number().min(0).max(1),
   reason: z.string().nullish(),
+  evidence_type: z
+    .enum([
+      'explicit_text',
+      'comment_anchor',
+      'exemplar_format',
+      'style_cluster',
+      'table_cell',
+      'llm_candidate',
+      'manual_text',
+      'template',
+    ])
+    .optional(),
 })
 
 export const ruleExtractionIssueSchema = z.object({
@@ -90,6 +127,7 @@ export const draftRuleSetSchema = z.object({
   version: z.string(),
   locale: z.string().optional(),
   rules: z.array(formatRuleSchema),
+  suggested_rules: z.array(formatRuleSchema).optional(),
   parse_warnings: z.array(z.string()),
   extraction_summary: extractionSummarySchema.optional(),
   unsupported_requirements: z.array(unsupportedRequirementSchema).optional(),

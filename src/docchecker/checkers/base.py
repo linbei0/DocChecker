@@ -15,4 +15,11 @@ class Checker(Protocol):
 
 
 def relevant_rules(rules: list[FormatRule], categories: set[RuleCategory]) -> list[FormatRule]:
-    return [rule for rule in rules if rule.enabled and rule.category in categories]
+    return [
+        rule
+        for rule in rules
+        if rule.enabled
+        and rule.category in categories
+        and rule.capability_status == "auto_checkable"
+        and not rule.confirmation_required
+    ]

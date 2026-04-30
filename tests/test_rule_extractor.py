@@ -48,11 +48,73 @@ def test_extract_title_rule_from_comment_style_text() -> None:
         source_type=SourceType.requirement_doc,
     )
 
-    title_rule = next(rule for rule in result.rules if rule.id == "title_format")
+    title_rule = next(rule for rule in result.suggested_rules if rule.id == "title_format")
 
     assert title_rule.expectation["fontFamilyEastAsia"] == "宋体"
     assert title_rule.expectation["fontSizePt"] == 16
     assert title_rule.expectation["bold"] is True
+    assert title_rule.capability_status == "needs_confirmation"
+    assert title_rule.confirmation_required is True
+
+
+def test_needs_confirmation_candidate_does_not_enter_auto_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "font",
+                    "target_scope": "body.paragraph",
+                    "selector": None,
+                    "expectation": {"fontFamilyEastAsia": "宋体"},
+                    "evidence_span": "正文一般采用宋体。",
+                    "location": "paragraph:1",
+                    "checkability": "needs_confirmation",
+                    "confidence": 0.72,
+                    "reason": "措辞不够确定",
+                }
+            ]
+        },
+    )
+
+    assert "font_candidate" not in {rule.id for rule in result.rules}
+    suggested = next(rule for rule in result.suggested_rules if rule.id == "font_candidate")
+    assert suggested.capability_status == "needs_confirmation"
+    assert suggested.confirmation_required is True
+    assert result.extraction_summary.needs_confirmation_rules == 1
+
+
+def test_unsupported_candidate_field_is_reported_not_auto_checked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "paragraph",
+                    "target_scope": "body.paragraph",
+                    "selector": None,
+                    "expectation": {"spaceBetweenNumberAndTitle": True},
+                    "evidence_span": "标题序号和标题之间空1格。",
+                    "location": "paragraph:2",
+                    "checkability": "checkable",
+                    "confidence": 0.9,
+                    "reason": None,
+                }
+            ]
+        },
+    )
+
+    assert result.rules == []
+    assert result.suggested_rules == []
+    assert any(
+        item.reason_code == "unsupported_field"
+        and item.capability_status == "unsupported"
+        for item in result.unsupported_requirements
+    )
 
 
 def test_extract_rules_keeps_requirement_locations() -> None:
@@ -205,6 +267,34 @@ def test_body_comment_anchor_extracts_body_font_rule(
     assert body_font.target.selector is None
     assert body_font.expectation == {"fontFamilyEastAsia": "宋体", "fontSizePt": 12}
     assert alignment.expectation == {"alignment": "justify"}
+
+
+def test_body_style_cluster_extracts_repeated_body_exemplar_rule(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    path = tmp_path / "requirement-body-cluster.docx"
+    document = Document()
+    for text in ["××××××（正文段落）", "××××××××（正文段落）"]:
+        paragraph = document.add_paragraph(text)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.paragraph_format.first_line_indent = Pt(24)
+        run = paragraph.runs[0]
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+        run.font.size = Pt(12)
+    document.save(path)
+
+    requirement = parse_requirement_document(path)
+    result = extract_rules_from_requirement_document(
+        requirement,
+        source_type=SourceType.requirement_doc,
+    )
+    body_font = next(rule for rule in result.rules if rule.id == "body_font")
+
+    assert body_font.source.evidence_type == "style_cluster"
+    assert body_font.expectation == {"fontFamilyEastAsia": "宋体", "fontSizePt": 12}
 
 
 def test_extract_rules_from_golden_corpus() -> None:

@@ -5,6 +5,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from docchecker.domain.enums import DraftRuleSetStatus, RuleCategory, Severity, SourceType
 
 
+RuleEvidenceType = Literal[
+    "explicit_text",
+    "comment_anchor",
+    "exemplar_format",
+    "style_cluster",
+    "table_cell",
+    "llm_candidate",
+    "manual_text",
+    "template",
+]
+
+RuleCapabilityStatus = Literal[
+    "auto_checkable",
+    "needs_confirmation",
+    "unsupported",
+    "conflict",
+    "parse_error",
+]
+
+
 class RuleTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -18,6 +38,8 @@ class RuleSource(BaseModel):
     type: SourceType
     excerpt: str
     location: str | None = None
+    evidence_type: RuleEvidenceType = "explicit_text"
+    evidence_label: str | None = None
 
 
 class FormatRule(BaseModel):
@@ -32,6 +54,8 @@ class FormatRule(BaseModel):
     source: RuleSource
     confidence: float = Field(ge=0, le=1, default=1)
     enabled: bool = True
+    capability_status: RuleCapabilityStatus = "auto_checkable"
+    confirmation_required: bool = False
 
 
 class ExtractionSummary(BaseModel):
@@ -44,6 +68,10 @@ class ExtractionSummary(BaseModel):
     supported_categories: list[RuleCategory] = Field(default_factory=list)
     unsupported_categories: list[RuleCategory] = Field(default_factory=list)
     uncovered_categories: list[RuleCategory] = Field(default_factory=list)
+    auto_checkable_rules: int = 0
+    needs_confirmation_rules: int = 0
+    conflict_requirements: int = 0
+    coverage_rate: float = 0
 
 
 RuleExtractionReasonCode = Literal[
@@ -64,6 +92,8 @@ class UnsupportedRequirement(BaseModel):
     location: str | None = None
     reason: str
     reason_code: RuleExtractionReasonCode = "missing_checker"
+    target_scope: str | None = None
+    capability_status: RuleCapabilityStatus = "unsupported"
 
 
 class ExtractedRuleCandidate(BaseModel):
@@ -78,6 +108,7 @@ class ExtractedRuleCandidate(BaseModel):
     checkability: Literal["checkable", "needs_confirmation", "unsupported"]
     confidence: float = Field(ge=0, le=1, default=0.8)
     reason: str | None = None
+    evidence_type: RuleEvidenceType = "explicit_text"
 
 
 class RuleExtractionIssue(BaseModel):
@@ -120,6 +151,7 @@ class DraftRuleSet(BaseModel):
     version: str = "1.0.0"
     locale: str = "zh-CN"
     rules: list[FormatRule] = Field(default_factory=list)
+    suggested_rules: list[FormatRule] = Field(default_factory=list)
     parse_warnings: list[str] = Field(default_factory=list)
     extraction_summary: ExtractionSummary = Field(default_factory=ExtractionSummary)
     unsupported_requirements: list[UnsupportedRequirement] = Field(default_factory=list)

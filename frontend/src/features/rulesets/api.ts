@@ -18,6 +18,7 @@ export interface CreateDraftRuleSetRequest {
 export interface UpdateDraftRuleSetRequest {
   name?: string
   rules: FormatRule[]
+  suggested_rules?: FormatRule[]
   parse_warnings?: string[]
 }
 

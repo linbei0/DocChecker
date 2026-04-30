@@ -548,6 +548,8 @@ function findingStatusLabel(status: FindingGroup['findings'][number]['status']) 
       mixed_value: '混合值',
       unsupported_field: '暂不支持',
       mismatch: '不一致',
+      mixed_script_ok: '混排正常',
+      needs_confirmation: '需确认',
     }[status] || '不一致'
   )
 }

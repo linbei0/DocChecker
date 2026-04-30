@@ -80,6 +80,7 @@ class UpdateDraftRuleSetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rules: list[FormatRule]
+    suggested_rules: list[FormatRule] | None = None
     name: str | None = None
     parse_warnings: list[str] | None = None
 
@@ -158,6 +159,7 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         if not template:
             raise HTTPException(status_code=404, detail="模板规则集不存在。")
         rules = [rule.model_copy(deep=True) for rule in template.rules]
+        suggested_rules: list[FormatRule] = []
         warnings: list[str] = []
         extraction_summary = ExtractionSummary(structured_rules=len(rules))
         unsupported_requirements: list[UnsupportedRequirement] = []
@@ -184,6 +186,7 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         except RuleExtractionConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         rules = result.rules
+        suggested_rules = result.suggested_rules
         warnings = result.parse_warnings
         extraction_summary = result.extraction_summary
         unsupported_requirements = result.unsupported_requirements
@@ -196,6 +199,7 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         document_id=request.document_id,
         source_type=request.source_type,
         rules=rules,
+        suggested_rules=suggested_rules,
         parse_warnings=warnings,
         extraction_summary=extraction_summary,
         unsupported_requirements=unsupported_requirements,
@@ -224,6 +228,9 @@ def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> D
         update={
             "name": request.name or draft.name,
             "rules": request.rules,
+            "suggested_rules": request.suggested_rules
+            if request.suggested_rules is not None
+            else draft.suggested_rules,
             "parse_warnings": request.parse_warnings
             if request.parse_warnings is not None
             else draft.parse_warnings,

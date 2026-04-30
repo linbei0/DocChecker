@@ -36,9 +36,14 @@ class CheckFinding(BaseModel):
     evidence: str
     suggestion: str
     certainty: Certainty = Certainty.certain
-    status: Literal["missing_actual", "mixed_value", "unsupported_field", "mismatch"] = (
-        "mismatch"
-    )
+    status: Literal[
+        "missing_actual",
+        "mixed_value",
+        "unsupported_field",
+        "mismatch",
+        "mixed_script_ok",
+        "needs_confirmation",
+    ] = "mismatch"
 
 
 class CheckReport(BaseModel):

@@ -25,7 +25,16 @@ export const checkFindingSchema = z.object({
   evidence: z.string(),
   suggestion: z.string(),
   certainty: z.enum(['certain', 'probable', 'unknown']).optional(),
-  status: z.enum(['missing_actual', 'mixed_value', 'unsupported_field', 'mismatch']).optional(),
+  status: z
+    .enum([
+      'missing_actual',
+      'mixed_value',
+      'unsupported_field',
+      'mismatch',
+      'mixed_script_ok',
+      'needs_confirmation',
+    ])
+    .optional(),
 })
 
 export const checkReportSchema = z.object({

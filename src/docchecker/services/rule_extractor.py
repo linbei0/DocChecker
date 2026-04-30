@@ -25,6 +25,7 @@ from docchecker.services.rule_compiler import compile_rule_candidates
 @dataclass(frozen=True)
 class RuleExtractionResult:
     rules: list[FormatRule]
+    suggested_rules: list[FormatRule]
     parse_warnings: list[str]
     extraction_summary: ExtractionSummary
     unsupported_requirements: list[UnsupportedRequirement]
@@ -36,6 +37,7 @@ class RequirementChunk:
     text: str
     location: str | None = None
     target_hint: str | None = None
+    evidence_type: str = "explicit_text"
 
 
 class RuleExtractionConfigurationError(RuntimeError):
@@ -90,6 +92,7 @@ def extract_rules_from_text(text: str, *, source_type: SourceType) -> RuleExtrac
         trace = RuleExtractionTrace(mode=get_settings().rule_extractor_mode)
         return RuleExtractionResult(
             rules=[],
+            suggested_rules=[],
             parse_warnings=["规则来源文本为空，未生成候选规则。"],
             extraction_summary=_summary([], []),
             unsupported_requirements=[],
@@ -108,6 +111,7 @@ def extract_rules_from_requirement_document(
             text=block.text,
             location=block.location,
             target_hint=_block_target_hint(block),
+            evidence_type=_block_evidence_type(block),
         )
         for block in document.blocks
         if block.text.strip()
@@ -116,6 +120,7 @@ def extract_rules_from_requirement_document(
         trace = RuleExtractionTrace(mode=get_settings().rule_extractor_mode)
         return RuleExtractionResult(
             rules=[],
+            suggested_rules=[],
             parse_warnings=["规则来源文档没有可解析文本块，未生成候选规则。"],
             extraction_summary=_summary([], []),
             unsupported_requirements=[],
@@ -138,25 +143,38 @@ def _extract_rules_from_chunks(
         candidates.extend(llm_candidates)
         issues.extend(llm_issues)
 
-    rules: list[FormatRule] = []
-    rules.extend(_extract_body_font_rules(chunks, source_type))
-    rules.extend(_extract_line_spacing_rules(chunks, source_type))
-    rules.extend(_extract_first_line_indent_rules(chunks, source_type))
-    rules.extend(_extract_paragraph_spacing_rules(chunks, source_type))
-    rules.extend(_extract_alignment_rules(chunks, source_type))
-    rules.extend(_extract_page_rules(chunks, source_type))
-    rules.extend(_extract_heading_rules(chunks, source_type))
-    rules.extend(_extract_title_rules(chunks, source_type))
-    rules.extend(_extract_named_font_rules(chunks, source_type))
+    extracted_rules: list[FormatRule] = []
+    extracted_rules.extend(_extract_body_font_rules(chunks, source_type))
+    extracted_rules.extend(_extract_line_spacing_rules(chunks, source_type))
+    extracted_rules.extend(_extract_first_line_indent_rules(chunks, source_type))
+    extracted_rules.extend(_extract_paragraph_spacing_rules(chunks, source_type))
+    extracted_rules.extend(_extract_alignment_rules(chunks, source_type))
+    extracted_rules.extend(_extract_page_rules(chunks, source_type))
+    extracted_rules.extend(_extract_heading_rules(chunks, source_type))
+    extracted_rules.extend(_extract_title_rules(chunks, source_type))
+    extracted_rules.extend(_extract_named_font_rules(chunks, source_type))
     if blocks:
-        rules.extend(_extract_exemplar_rules(blocks, source_type))
+        extracted_rules.extend(_extract_style_cluster_rules(blocks, source_type))
+        extracted_rules.extend(_extract_exemplar_rules(blocks, source_type))
     compilation = compile_rule_candidates(candidates, source_type=source_type)
-    rules.extend(compilation.rules)
+    combined_rules = extracted_rules + compilation.rules + compilation.suggested_rules
+    combined_rules, conflict_issues = _move_conflicting_rules_to_confirmation(combined_rules)
+    auto_rules, suggested_rules = _split_rules_by_confirmation(combined_rules)
     issues.extend(compilation.issues)
-
-    deduped_rules = _dedupe_rules(rules)
-    unsupported = _extract_unsupported_requirements(chunks, deduped_rules, issues)
-    warnings = _build_warnings(chunks, deduped_rules, unsupported)
+    issues.extend(conflict_issues)
+    deduped_rules = _dedupe_rules(auto_rules)
+    deduped_suggested_rules = _dedupe_rules(suggested_rules)
+    unsupported = _extract_unsupported_requirements(
+        chunks,
+        deduped_rules + deduped_suggested_rules,
+        issues,
+    )
+    warnings = _build_warnings(
+        chunks,
+        deduped_rules,
+        deduped_suggested_rules,
+        unsupported,
+    )
     trace = RuleExtractionTrace(
         mode=settings.rule_extractor_mode,
         candidates=candidates,
@@ -164,8 +182,15 @@ def _extract_rules_from_chunks(
     )
     return RuleExtractionResult(
         rules=deduped_rules,
+        suggested_rules=deduped_suggested_rules,
         parse_warnings=warnings,
-        extraction_summary=_summary(deduped_rules, unsupported, chunks),
+        extraction_summary=_summary(
+            deduped_rules,
+            unsupported,
+            chunks,
+            suggested_rules=deduped_suggested_rules,
+            issues=issues,
+        ),
         unsupported_requirements=unsupported,
         extraction_trace=trace,
     )
@@ -457,9 +482,94 @@ def _extract_named_font_rules(
                         chunk,
                         source_type,
                         Severity.major,
-                        confidence=0.78,
+                        confidence=0.86,
                     )
                 )
+    return rules
+
+
+def _extract_style_cluster_rules(
+    blocks: list[RequirementBlock],
+    source_type: SourceType,
+) -> list[FormatRule]:
+    clusters: dict[tuple[tuple[str, object], ...], list[RequirementBlock]] = {}
+    for block in blocks:
+        if block.type != "paragraph" or "正文段落" not in block.text:
+            continue
+        formatting = block.context.get("formatting")
+        if not isinstance(formatting, dict):
+            continue
+        signature = tuple(
+            sorted(
+                (field, value)
+                for field, value in formatting.items()
+                if field
+                in {
+                    "fontFamilyEastAsia",
+                    "fontSizePt",
+                    "alignment",
+                    "firstLineIndentCm",
+                    "lineSpacing",
+                    "spaceBeforePt",
+                    "spaceAfterPt",
+                }
+            )
+        )
+        if signature:
+            clusters.setdefault(signature, []).append(block)
+
+    rules: list[FormatRule] = []
+    for cluster_blocks in clusters.values():
+        if len(cluster_blocks) < 2:
+            continue
+        formatting = cluster_blocks[0].context.get("formatting")
+        if not isinstance(formatting, dict):
+            continue
+        chunk = RequirementChunk(
+            text="；".join(block.text for block in cluster_blocks[:3]),
+            location=",".join(block.location for block in cluster_blocks[:3]),
+            target_hint="body.paragraph",
+            evidence_type="style_cluster",
+        )
+        font_expectation = {
+            field: formatting[field]
+            for field in ["fontFamilyEastAsia", "fontSizePt"]
+            if field in formatting
+        }
+        if font_expectation:
+            rules.append(
+                _rule(
+                    "body_font",
+                    RuleCategory.font,
+                    "body.paragraph",
+                    None,
+                    font_expectation,
+                    chunk,
+                    source_type,
+                    Severity.major,
+                    confidence=0.82,
+                )
+            )
+        paragraph_expectation = {
+            field: formatting[field]
+            for field in ["alignment", "firstLineIndentCm", "lineSpacing"]
+            if field in formatting
+        }
+        if paragraph_expectation:
+            rules.append(
+                _rule(
+                    "body_paragraph_from_style_cluster",
+                    RuleCategory.paragraph,
+                    "body.paragraph",
+                    None,
+                    paragraph_expectation,
+                    chunk,
+                    source_type,
+                    Severity.major,
+                    tolerance={"firstLineIndentCm": 0.15},
+                    confidence=0.82,
+                )
+            )
     return rules
 
 
@@ -797,6 +907,18 @@ def _block_target_hint(block: RequirementBlock) -> str | None:
     return _target_hint_from_text(block.text)
 
 
+def _block_evidence_type(block: RequirementBlock) -> str:
+    if block.type == "comment":
+        return "comment_anchor" if block.context.get("nearby_location") else "explicit_text"
+    if block.type == "table":
+        return "table_cell"
+    if block.type in {"header", "footer"}:
+        return "explicit_text"
+    if _heading_exemplar_level(block.text) is not None or _target_hint_from_text(block.text):
+        return "exemplar_format"
+    return "explicit_text"
+
+
 def _target_hint_from_text(text: str) -> str | None:
     if "正文段落" in text or re.search(r"(^|[（(])正文([）)]|$)", text):
         return "body.paragraph"
@@ -1011,10 +1133,162 @@ def _rule(
         expectation=expectation,
         tolerance=tolerance or {},
         severity=severity,
-        source=RuleSource(type=source_type, excerpt=chunk.text[:300], location=chunk.location),
+        source=RuleSource(
+            type=source_type,
+            excerpt=chunk.text[:300],
+            location=chunk.location,
+            evidence_type=chunk.evidence_type,
+        ),
         confidence=confidence,
         enabled=True,
     )
+
+
+def _split_rules_by_confirmation(
+    rules: list[FormatRule],
+) -> tuple[list[FormatRule], list[FormatRule]]:
+    auto_rules: list[FormatRule] = []
+    suggested_rules: list[FormatRule] = []
+    for rule in rules:
+        if rule.confidence >= 0.8 and rule.capability_status == "auto_checkable":
+            auto_rules.append(rule)
+            continue
+        suggested_rules.append(
+            rule.model_copy(
+                update={
+                    "enabled": False,
+                    "capability_status": "needs_confirmation",
+                    "confirmation_required": True,
+                }
+            )
+        )
+    return auto_rules, suggested_rules
+
+
+def _move_conflicting_rules_to_confirmation(
+    rules: list[FormatRule],
+) -> tuple[list[FormatRule], list[RuleExtractionIssue]]:
+    by_field: dict[tuple[str, str | None, RuleCategory, str], list[tuple[FormatRule, object]]] = {}
+    conflict_keys: set[tuple[str, str | None, RuleCategory, str]] = set()
+    auto_allowed: set[tuple[int, str, str | None, RuleCategory, str]] = set()
+    issues: list[RuleExtractionIssue] = []
+    for rule in rules:
+        for field, value in rule.expectation.items():
+            key = (rule.target.scope, rule.target.selector, rule.category, field)
+            by_field.setdefault(key, []).append((rule, value))
+
+    for key, values in by_field.items():
+        distinct_values = []
+        for _, value in values:
+            if value not in distinct_values:
+                distinct_values.append(value)
+        if len(distinct_values) <= 1:
+            continue
+        conflict_keys.add(key)
+        ranked = sorted(
+            values,
+            key=lambda item: _rule_conflict_rank(item[0]),
+            reverse=True,
+        )
+        top_rank = _rule_conflict_rank(ranked[0][0])
+        top_rules = [item for item in ranked if _rule_conflict_rank(item[0]) == top_rank]
+        if len(top_rules) == 1:
+            winner = top_rules[0][0]
+            auto_allowed.add((id(winner), *key))
+            message = (
+                f"同一检查目标存在冲突规则：{key[3]} 存在多个值，"
+                "已优先保留高置信/高优先级证据，其余规则需要人工确认。"
+            )
+            location = winner.source.location
+            excerpt = winner.source.excerpt
+        else:
+            winner = ranked[0][0]
+            message = (
+                f"同一检查目标存在冲突规则：{key[3]} 存在多个同优先级值，"
+                "需要人工确认。"
+            )
+            location = winner.source.location
+            excerpt = winner.source.excerpt
+        issues.append(
+            RuleExtractionIssue(
+                location=location,
+                category=winner.category,
+                reason_code="ambiguous_requirement",
+                message=message,
+                excerpt=excerpt,
+            )
+        )
+
+    normalized_rules: list[FormatRule] = []
+    for rule in rules:
+        conflicting_fields = [
+            field
+            for field in rule.expectation
+            if (rule.target.scope, rule.target.selector, rule.category, field) in conflict_keys
+        ]
+        rule_conflicts = bool(conflicting_fields)
+        if not rule_conflicts:
+            normalized_rules.append(rule)
+            continue
+        if all((id(rule), rule.target.scope, rule.target.selector, rule.category, field) in auto_allowed for field in conflicting_fields):
+            normalized_rules.append(rule)
+            continue
+        normalized_rules.append(
+            rule.model_copy(
+                update={
+                    "enabled": False,
+                    "capability_status": "needs_confirmation",
+                    "confirmation_required": True,
+                }
+            )
+        )
+    return normalized_rules, issues
+
+
+def _rule_conflict_rank(rule: FormatRule) -> tuple[int, float]:
+    evidence_rank = {
+        "template": 6,
+        "exemplar_format": 5,
+        "comment_anchor": 4,
+        "style_cluster": 3,
+        "table_cell": 2,
+        "explicit_text": 1,
+        "manual_text": 1,
+        "llm_candidate": 1,
+    }.get(rule.source.evidence_type, 0)
+    return (evidence_rank, rule.confidence)
+
+
+def _conflict_issues(rules: list[FormatRule]) -> list[RuleExtractionIssue]:
+    by_field: dict[tuple[str, str | None, RuleCategory, str], FormatRule] = {}
+    reported: set[tuple[str, str | None, RuleCategory, str]] = set()
+    issues: list[RuleExtractionIssue] = []
+    for rule in rules:
+        for field, value in rule.expectation.items():
+            key = (rule.target.scope, rule.target.selector, rule.category, field)
+            existing = by_field.get(key)
+            if existing is None:
+                by_field[key] = rule
+                continue
+            existing_value = existing.expectation.get(field)
+            if existing_value == value:
+                continue
+            if key in reported:
+                continue
+            reported.add(key)
+            issues.append(
+                RuleExtractionIssue(
+                    location=rule.source.location,
+                    category=rule.category,
+                    reason_code="ambiguous_requirement",
+                    message=(
+                        f"同一检查目标存在冲突规则：{field} 同时为 "
+                        f"{existing_value} 和 {value}，需要人工确认。"
+                    ),
+                    excerpt=rule.source.excerpt,
+                )
+            )
+    return issues
 
 
 def _extract_unsupported_requirements(
@@ -1045,11 +1319,16 @@ def _extract_unsupported_requirements(
                         location=chunk.location,
                         reason=reason,
                         reason_code="missing_checker",
+                        target_scope=None,
+                        capability_status="unsupported",
                     )
                 )
                 break
     for issue in issues or []:
-        if issue.reason_code != "unsupported_field" and _issue_covered_by_rule(issue, rules):
+        if (
+            issue.reason_code not in {"unsupported_field", "ambiguous_requirement"}
+            and _issue_covered_by_rule(issue, rules)
+        ):
             continue
         unsupported.append(
             UnsupportedRequirement(
@@ -1058,6 +1337,14 @@ def _extract_unsupported_requirements(
                 location=issue.location,
                 reason=issue.message,
                 reason_code=issue.reason_code,
+                target_scope=None,
+                capability_status=(
+                    "conflict"
+                    if "冲突" in issue.message
+                    else "needs_confirmation"
+                    if issue.reason_code == "ambiguous_requirement"
+                    else "unsupported"
+                ),
             )
         )
     return _dedupe_unsupported(unsupported)
@@ -1082,6 +1369,7 @@ def _has_checkable_page_header_footer(chunk: RequirementChunk) -> bool:
 def _build_warnings(
     chunks: list[RequirementChunk],
     rules: list[FormatRule],
+    suggested_rules: list[FormatRule],
     unsupported: list[UnsupportedRequirement],
 ) -> list[str]:
     warnings: list[str] = []
@@ -1090,9 +1378,8 @@ def _build_warnings(
     for item in unsupported:
         location = f"{item.location}：" if item.location else ""
         warnings.append(f"{location}{item.reason}")
-    low_confidence = [rule for rule in rules if rule.confidence < 0.8]
-    if low_confidence:
-        warnings.append(f"有 {len(low_confidence)} 条规则置信度较低，请在确认页重点核对。")
+    if suggested_rules:
+        warnings.append(f"有 {len(suggested_rules)} 条规则需要人工确认后才会参与自动检查。")
     if not rules and not unsupported and chunks:
         warnings.append("规范文本已读取，但未命中当前规则能力矩阵中的格式要求。")
     return warnings
@@ -1102,7 +1389,12 @@ def _summary(
     rules: list[FormatRule],
     unsupported: list[UnsupportedRequirement],
     chunks: list[RequirementChunk] | None = None,
+    *,
+    suggested_rules: list[FormatRule] | None = None,
+    issues: list[RuleExtractionIssue] | None = None,
 ) -> ExtractionSummary:
+    suggested_rules = suggested_rules or []
+    issues = issues or []
     supported_categories = sorted({rule.category for rule in rules}, key=lambda item: item.value)
     unsupported_categories = sorted(
         {item.category for item in unsupported},
@@ -1110,14 +1402,24 @@ def _summary(
     )
     present_categories = set(supported_categories) | set(unsupported_categories)
     uncovered = sorted(set(ALL_RULE_CATEGORIES) - present_categories, key=lambda item: item.value)
+    total_requirements = _count_requirement_candidates(
+        chunks or [],
+        rules + suggested_rules,
+        unsupported,
+    )
+    handled = len(rules) + len(suggested_rules) + len(unsupported)
     return ExtractionSummary(
-        total_requirements=_count_requirement_candidates(chunks or [], rules, unsupported),
+        total_requirements=total_requirements,
         structured_rules=len(rules),
         unsupported_requirements=len(unsupported),
-        low_confidence_rules=len([rule for rule in rules if rule.confidence < 0.8]),
+        low_confidence_rules=len(suggested_rules),
         supported_categories=supported_categories,
         unsupported_categories=unsupported_categories,
         uncovered_categories=uncovered,
+        auto_checkable_rules=len(rules),
+        needs_confirmation_rules=len(suggested_rules),
+        conflict_requirements=len([issue for issue in issues if "冲突" in issue.message]),
+        coverage_rate=round(handled / total_requirements, 3) if total_requirements else 0,
     )
 
 
@@ -1156,11 +1458,17 @@ def _split_requirement_chunks(text: str) -> list[RequirementChunk]:
             part_location = location
             if location and len(parts) > 1:
                 part_location = f"{location},part:{part_index}"
-            chunks.append(RequirementChunk(text=part, location=part_location))
+            chunks.append(
+                RequirementChunk(
+                    text=part,
+                    location=part_location,
+                    evidence_type="manual_text",
+                )
+            )
     if not chunks:
         normalized = re.sub(r"\s+", " ", text.strip())
         chunks.extend(
-            RequirementChunk(text=part.strip())
+            RequirementChunk(text=part.strip(), evidence_type="manual_text")
             for part in re.split(r"[。；;\n\r]", normalized)
             if part.strip()
         )

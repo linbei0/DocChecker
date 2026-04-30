@@ -14,6 +14,9 @@ from docchecker.domain.rules import (
     RuleTarget,
 )
 
+AUTO_CHECK_MIN_CONFIDENCE = 0.8
+NEEDS_CONFIRMATION_MIN_CONFIDENCE = 0.6
+
 FONT_SIZE_BY_NAME = {
     "初号": 42,
     "小初": 36,
@@ -37,6 +40,7 @@ FONT_SIZE_BY_NAME = {
 @dataclass
 class RuleCompilationResult:
     rules: list[FormatRule] = field(default_factory=list)
+    suggested_rules: list[FormatRule] = field(default_factory=list)
     issues: list[RuleExtractionIssue] = field(default_factory=list)
 
 
@@ -47,16 +51,12 @@ def compile_rule_candidates(
 ) -> RuleCompilationResult:
     result = RuleCompilationResult()
     for candidate in candidates:
-        if candidate.checkability != "checkable":
+        if candidate.checkability == "unsupported":
             result.issues.append(
                 RuleExtractionIssue(
                     location=candidate.location,
                     category=candidate.category,
-                    reason_code=(
-                        "ambiguous_requirement"
-                        if candidate.checkability == "needs_confirmation"
-                        else "missing_checker"
-                    ),
+                    reason_code="missing_checker",
                     message=candidate.reason
                     or "规则候选需要人工确认或当前系统暂不支持自动校验。",
                     excerpt=candidate.evidence_span[:300],
@@ -94,25 +94,48 @@ def compile_rule_candidates(
         if not expectation:
             continue
 
-        result.rules.append(
-            FormatRule(
-                id=_candidate_rule_id(candidate),
-                category=candidate.category,
-                target=RuleTarget(
-                    scope=candidate.target_scope,
-                    selector=candidate.selector,
-                ),
-                expectation=expectation,
-                severity=_candidate_severity(candidate.category),
-                source=RuleSource(
-                    type=source_type,
-                    excerpt=candidate.evidence_span[:300],
-                    location=candidate.location,
-                ),
-                confidence=candidate.confidence,
-                enabled=True,
-            )
+        rule = FormatRule(
+            id=_candidate_rule_id(candidate),
+            category=candidate.category,
+            target=RuleTarget(
+                scope=candidate.target_scope,
+                selector=candidate.selector,
+            ),
+            expectation=expectation,
+            severity=_candidate_severity(candidate.category),
+            source=RuleSource(
+                type=source_type,
+                excerpt=candidate.evidence_span[:300],
+                location=candidate.location,
+                evidence_type=candidate.evidence_type,
+            ),
+            confidence=candidate.confidence,
+            enabled=True,
         )
+        if (
+            candidate.checkability == "checkable"
+            and candidate.confidence >= AUTO_CHECK_MIN_CONFIDENCE
+        ):
+            result.rules.append(rule)
+        elif candidate.confidence >= NEEDS_CONFIRMATION_MIN_CONFIDENCE:
+            result.suggested_rules.append(
+                rule.model_copy(
+                    update={
+                        "enabled": False,
+                        "capability_status": "needs_confirmation",
+                        "confirmation_required": True,
+                    }
+                )
+            )
+            result.issues.append(
+                RuleExtractionIssue(
+                    location=candidate.location,
+                    category=candidate.category,
+                    reason_code="ambiguous_requirement",
+                    message=candidate.reason or "规则候选置信度不足，需要人工确认后才能自动检查。",
+                    excerpt=candidate.evidence_span[:300],
+                )
+            )
     return result
 
 
