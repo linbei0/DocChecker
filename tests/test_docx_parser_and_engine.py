@@ -99,7 +99,7 @@ def test_parse_docx_tracks_mixed_script_fonts_separately(tmp_path: Path) -> None
     assert paragraph_node.runs[1].font_family_ascii == "Times New Roman"
 
 
-def test_font_checker_reports_mixed_east_asia_fonts_instead_of_unparsed(
+def test_font_checker_ignores_keyword_label_when_checking_keyword_content_font(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "mixed-font-check.docx"
@@ -134,9 +134,81 @@ def test_font_checker_reports_mixed_east_asia_fonts_instead_of_unparsed(
 
     findings = CheckEngine().run(model, ruleset.rules)
 
-    assert len(findings) == 1
-    assert findings[0].actual == {"fontFamilyEastAsia": "混合：黑体、宋体"}
-    assert findings[0].certainty.value == "certain"
+    assert findings == []
+
+
+def test_font_checker_checks_keyword_english_runs_separately(tmp_path: Path) -> None:
+    path = tmp_path / "keyword-english-font.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    label = paragraph.add_run("关键词：")
+    label._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "黑体")
+    content = paragraph.add_run("校园社团管理")
+    content._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+    english = paragraph.add_run(" Layui")
+    english.font.name = "Times New Roman"
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="keyword-english-font.docx")
+    ruleset = RuleSet(
+        id="ruleset_keyword_english_font",
+        name="关键词英文字体",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="keyword_en_font",
+                category=RuleCategory.font,
+                target=RuleTarget(scope="keywords.paragraph", selector="关键词"),
+                expectation={"fontFamilyEastAsia": "Times New Roman"},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="关键词英文 Times New Roman"),
+                confidence=1,
+            )
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+
+    assert findings == []
+
+
+def test_font_checker_does_not_fail_keyword_chinese_when_only_latin_fallback_exists(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "keyword-latin-fallback.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    label = paragraph.add_run("关键词：")
+    label._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "黑体")
+    content = paragraph.add_run("校园社团管理")
+    content.font.name = "Calibri"
+    english = paragraph.add_run(" Layui")
+    english.font.name = "Times New Roman"
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="keyword-latin-fallback.docx")
+    ruleset = RuleSet(
+        id="ruleset_keyword_cn_fallback",
+        name="关键词中文字体",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="keyword_cn_font",
+                category=RuleCategory.font,
+                target=RuleTarget(scope="keywords.paragraph", selector="关键词"),
+                expectation={"fontFamilyEastAsia": "宋体"},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="关键词中文宋体"),
+                confidence=1,
+            )
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+
+    assert findings == []
 
 
 def test_parse_docx_tracks_nearest_heading_as_logical_section(tmp_path: Path) -> None:
@@ -219,6 +291,68 @@ def test_heading_rules_do_not_match_body_text_mentions(tmp_path: Path) -> None:
 
     assert len(findings) == 1
     assert findings[0].excerpt == "绪论"
+
+
+def test_heading_rules_match_exact_heading_level(tmp_path: Path) -> None:
+    path = tmp_path / "heading-levels.docx"
+    document = Document()
+    document.add_heading("绪论", level=1)
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="heading-levels.docx")
+    ruleset = RuleSet(
+        id="ruleset_heading_levels",
+        name="标题级别规则",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="heading3_alignment",
+                category=RuleCategory.paragraph,
+                target=RuleTarget(scope="heading.3", selector="Heading 3"),
+                expectation={"alignment": "left"},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="三级标题左对齐"),
+                confidence=1,
+            )
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+
+    assert findings == []
+
+
+def test_missing_paragraph_defaults_are_reported_as_values(tmp_path: Path) -> None:
+    path = tmp_path / "paragraph-defaults.docx"
+    document = Document()
+    document.add_heading("绪论", level=1)
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="paragraph-defaults.docx")
+    ruleset = RuleSet(
+        id="ruleset_defaults",
+        name="段落默认值",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="heading1_indent",
+                category=RuleCategory.paragraph,
+                target=RuleTarget(scope="heading.1", selector="Heading 1"),
+                expectation={"firstLineIndentCm": 0.74},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="一级标题首行缩进2字符"),
+                confidence=1,
+            )
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+
+    assert len(findings) == 1
+    assert findings[0].actual == {"firstLineIndentCm": 0.0}
+    assert findings[0].certainty.value == "certain"
 
 
 def test_markdown_report_includes_fragment_context(tmp_path: Path) -> None:
@@ -395,6 +529,39 @@ def test_structure_checker_ignores_toc_entries_for_order(tmp_path: Path) -> None
     findings = CheckEngine().run(model, ruleset.rules)
 
     assert findings == []
+
+
+def test_heading_checkers_ignore_numbered_toc_entries(tmp_path: Path) -> None:
+    path = tmp_path / "paper-toc-heading.docx"
+    document = Document()
+    document.add_paragraph("目  录")
+    document.styles.add_style("toc 1", WD_STYLE_TYPE.PARAGRAPH)
+    document.add_paragraph("2 系统技术选型 3", style="toc 1")
+    document.add_heading("绪论", level=1)
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="paper-toc-heading.docx")
+    ruleset = RuleSet(
+        id="ruleset_toc_heading",
+        name="标题规则",
+        source_type=SourceType.manual,
+        version="1.0.0",
+        created_at="2026-04-26T00:00:00+08:00",
+        rules=[
+            FormatRule(
+                id="heading1_font",
+                category=RuleCategory.heading,
+                target=RuleTarget(scope="heading.1", selector="Heading 1"),
+                expectation={"fontSizePt": 12},
+                severity=Severity.major,
+                source=RuleSource(type=SourceType.manual, excerpt="一级标题小四"),
+                confidence=1,
+            )
+        ],
+    )
+
+    findings = CheckEngine().run(model, ruleset.rules)
+
+    assert all(finding.excerpt != "2 系统技术选型 3" for finding in findings)
 
 
 def test_structure_finding_includes_document_excerpt(tmp_path: Path) -> None:

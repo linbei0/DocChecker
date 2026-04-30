@@ -1,11 +1,17 @@
 import json
 
 import pytest
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt
 
 from docchecker.core.config import get_settings
 from docchecker.domain.enums import SourceType
+from docchecker.services.requirement_parser import parse_requirement_document
 from docchecker.services.rule_extractor import (
     RuleExtractionConfigurationError,
+    extract_rules_from_requirement_document,
     extract_rules_from_text,
 )
 
@@ -79,6 +85,126 @@ def test_extract_rules_maps_semantic_requirements_to_checkable_rules(
     assert "reference_basic_entries" in rule_ids
     assert "toc_basic_shape" in rule_ids
     assert result.extraction_summary.unsupported_requirements == 0
+
+
+def test_extract_rules_does_not_treat_caption_or_abstract_notes_as_body_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    result = extract_rules_from_text(
+        "\n".join(
+            [
+                "图注用五号字宋体，两端对齐，首行缩进2字符，段前6磅，段后12磅。",
+                "摘要中应避免出现公式、图表，不引用参考文献。",
+            ]
+        ),
+        source_type=SourceType.requirement_doc,
+    )
+
+    rule_ids = {rule.id for rule in result.rules}
+
+    assert "body_first_line_indent" not in rule_ids
+    assert "body_paragraph_spacing" not in rule_ids
+    assert "caption_basic_pattern" in rule_ids
+    assert "reference_basic_entries" not in rule_ids
+
+
+def test_extract_rules_accepts_heading_first_line_indent_with_ge_character(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    result = extract_rules_from_text(
+        "一级标题左对齐，首行缩进2个字符，段后6磅。",
+        source_type=SourceType.requirement_doc,
+    )
+
+    rule = next(rule for rule in result.rules if rule.id == "heading_1_first_line_indent")
+
+    assert rule.target.scope == "heading.1"
+    assert rule.expectation == {"firstLineIndentCm": 0.74}
+
+
+def test_requirement_doc_exemplar_format_overrides_comment_text(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    path = tmp_path / "requirement-exemplar.docx"
+    document = Document()
+    paragraph = document.add_paragraph("1 绪论")
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.runs[0]
+    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "黑体")
+    run.font.size = Pt(16)
+    document.add_paragraph(
+        "数字 Times New Roman 小四，中文 宋体、小四，"
+        "序号和一级标题之间空1格。段落设置中，对齐方式左对齐。"
+    )
+    document.save(path)
+
+    requirement = parse_requirement_document(path)
+    result = extract_rules_from_requirement_document(
+        requirement,
+        source_type=SourceType.requirement_doc,
+    )
+    rule = next(rule for rule in result.rules if rule.id == "heading1_font")
+
+    assert rule.expectation["fontFamilyEastAsia"] == "黑体"
+    assert rule.expectation["fontSizePt"] == 16
+    assert rule.expectation["alignment"] == "center"
+    assert rule.confidence == 0.98
+    alignment_rule = next(rule for rule in result.rules if rule.id == "heading_1_alignment")
+    assert alignment_rule.expectation == {"alignment": "center"}
+    assert alignment_rule.confidence == 0.98
+
+
+def test_body_comment_anchor_extracts_body_font_rule(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    path = tmp_path / "requirement-body-comment.docx"
+    document = Document()
+    document.add_paragraph("1 绪论")
+    document.add_paragraph("××××××（正文段落）")
+    document.save(path)
+
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    with ZipFile(path, "a", ZIP_DEFLATED) as package:
+        document_xml = package.read("word/document.xml").decode("utf-8")
+        document_xml = document_xml.replace(
+            "<w:t>××××××（正文段落）</w:t>",
+            '<w:commentRangeStart w:id="15"/><w:t>××××××（正文段落）</w:t><w:commentRangeEnd w:id="15"/><w:r><w:commentReference w:id="15"/></w:r>',
+        )
+        package.writestr("word/document.xml", document_xml)
+        package.writestr(
+            "word/comments.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="15" w:author="user">
+    <w:p><w:r><w:t>中文 宋体、小四，英文和数字 Times New Roman、小四，两端对齐，首行缩进2字符，行距1.5倍。</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>
+""",
+        )
+
+    requirement = parse_requirement_document(path)
+    result = extract_rules_from_requirement_document(
+        requirement,
+        source_type=SourceType.requirement_doc,
+    )
+    body_font = next(rule for rule in result.rules if rule.id == "body_font")
+    alignment = next(rule for rule in result.rules if rule.id == "body_alignment")
+
+    assert body_font.target.scope == "body.paragraph"
+    assert body_font.target.selector is None
+    assert body_font.expectation == {"fontFamilyEastAsia": "宋体", "fontSizePt": 12}
+    assert alignment.expectation == {"alignment": "justify"}
 
 
 def test_extract_rules_from_golden_corpus() -> None:

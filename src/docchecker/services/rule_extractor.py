@@ -35,6 +35,7 @@ class RuleExtractionResult:
 class RequirementChunk:
     text: str
     location: str | None = None
+    target_hint: str | None = None
 
 
 class RuleExtractionConfigurationError(RuntimeError):
@@ -103,7 +104,11 @@ def extract_rules_from_requirement_document(
     source_type: SourceType,
 ) -> RuleExtractionResult:
     chunks = [
-        RequirementChunk(text=block.text, location=block.location)
+        RequirementChunk(
+            text=block.text,
+            location=block.location,
+            target_hint=_block_target_hint(block),
+        )
         for block in document.blocks
         if block.text.strip()
     ]
@@ -143,6 +148,8 @@ def _extract_rules_from_chunks(
     rules.extend(_extract_heading_rules(chunks, source_type))
     rules.extend(_extract_title_rules(chunks, source_type))
     rules.extend(_extract_named_font_rules(chunks, source_type))
+    if blocks:
+        rules.extend(_extract_exemplar_rules(blocks, source_type))
     compilation = compile_rule_candidates(candidates, source_type=source_type)
     rules.extend(compilation.rules)
     issues.extend(compilation.issues)
@@ -169,7 +176,7 @@ def _extract_body_font_rules(
     source_type: SourceType,
 ) -> list[FormatRule]:
     rules: list[FormatRule] = []
-    for chunk in _chunks_containing(chunks, ["正文"]):
+    for chunk in _body_rule_chunks(chunks):
         expectation = _font_expectation(chunk.text)
         if expectation:
             rules.append(
@@ -177,7 +184,7 @@ def _extract_body_font_rules(
                     "body_font",
                     RuleCategory.font,
                     "body.paragraph",
-                    "正文",
+                    None,
                     expectation,
                     chunk,
                     source_type,
@@ -196,7 +203,9 @@ def _extract_line_spacing_rules(
         match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:倍)?行距", chunk.text)
         if not match:
             continue
-        scope, selector = _paragraph_target(chunk.text)
+        scope, selector = _paragraph_target(chunk.text, chunk.target_hint)
+        if _should_skip_default_body_paragraph_rule(scope, chunk):
+            continue
         rules.append(
             _rule(
                 _scoped_rule_id(scope, "line_spacing"),
@@ -218,24 +227,30 @@ def _extract_first_line_indent_rules(
 ) -> list[FormatRule]:
     rules: list[FormatRule] = []
     for chunk in _chunks_containing(chunks, ["首行缩进"]):
-        match = re.search(r"首行缩进\s*([0-9]+(?:\.[0-9]+)?)\s*(?:字符|字)", chunk.text)
+        match = re.search(
+            r"首行缩进\s*([0-9]+(?:\.[0-9]+)?)\s*(?:个)?(?:字符|字)",
+            chunk.text,
+        )
         if not match:
             continue
         # 中文论文规范常用“2 字符”，按小四正文约 0.74cm 估算，报告中保留来源证据。
         indent_cm = round(float(match.group(1)) * 0.37, 2)
-        scope, selector = _paragraph_target(chunk.text)
+        scope, selector = _paragraph_target(chunk.text, chunk.target_hint)
+        if _should_skip_default_body_paragraph_rule(scope, chunk):
+            continue
         rules.append(
-            _rule(
-                _scoped_rule_id(scope, "first_line_indent"),
-                RuleCategory.paragraph,
-                scope,
-                selector,
-                {"firstLineIndentCm": indent_cm},
-                chunk,
-                source_type,
-                Severity.major,
+                _rule(
+                    _scoped_rule_id(scope, "first_line_indent"),
+                    RuleCategory.paragraph,
+                    scope,
+                    selector,
+                    {"firstLineIndentCm": indent_cm},
+                    chunk,
+                    source_type,
+                    Severity.major,
+                    tolerance={"firstLineIndentCm": 0.15},
+                )
             )
-        )
     return rules
 
 
@@ -253,7 +268,9 @@ def _extract_paragraph_spacing_rules(
         if after_match:
             expectation["spaceAfterPt"] = float(after_match.group(1))
         if expectation:
-            scope, selector = _paragraph_target(chunk.text)
+            scope, selector = _paragraph_target(chunk.text, chunk.target_hint)
+            if _should_skip_default_body_paragraph_rule(scope, chunk):
+                continue
             rules.append(
                 _rule(
                     _scoped_rule_id(scope, "paragraph_spacing"),
@@ -278,8 +295,8 @@ def _extract_alignment_rules(
         alignment = _alignment_value(chunk.text)
         if not alignment:
             continue
-        scope, selector = _paragraph_target(chunk.text)
-        if scope == "body.paragraph":
+        scope, selector = _paragraph_target(chunk.text, chunk.target_hint)
+        if scope == "body.paragraph" and chunk.target_hint != "body.paragraph":
             continue
         rules.append(
             _rule(
@@ -446,6 +463,117 @@ def _extract_named_font_rules(
     return rules
 
 
+def _extract_exemplar_rules(
+    blocks: list[RequirementBlock],
+    source_type: SourceType,
+) -> list[FormatRule]:
+    rules: list[FormatRule] = []
+    for block in blocks:
+        if block.type != "paragraph" or _looks_like_toc_entry(block.text):
+            continue
+        level = _heading_exemplar_level(block.text)
+        if level is None:
+            continue
+        formatting = block.context.get("formatting")
+        if not isinstance(formatting, dict):
+            continue
+        chunk = RequirementChunk(text=block.text, location=block.location)
+        scope = f"heading.{level}"
+        selector = f"Heading {level}"
+        heading_expectation = _heading_expectation_from_formatting(formatting)
+        if heading_expectation:
+            rules.append(
+                _rule(
+                    f"heading{level}_font",
+                    RuleCategory.heading,
+                    scope,
+                    selector,
+                    heading_expectation,
+                    chunk,
+                    source_type,
+                    Severity.major,
+                    confidence=0.98,
+                )
+            )
+        paragraph_expectation = _paragraph_expectation_from_formatting(formatting)
+        if "firstLineIndentCm" in paragraph_expectation:
+            rules.append(
+                _rule(
+                    f"heading_{level}_first_line_indent",
+                    RuleCategory.paragraph,
+                    scope,
+                    selector,
+                    {"firstLineIndentCm": paragraph_expectation["firstLineIndentCm"]},
+                    chunk,
+                    source_type,
+                    Severity.major,
+                    confidence=0.98,
+                )
+            )
+        if "alignment" in paragraph_expectation:
+            rules.append(
+                _rule(
+                    f"heading_{level}_alignment",
+                    RuleCategory.paragraph,
+                    scope,
+                    selector,
+                    {"alignment": paragraph_expectation["alignment"]},
+                    chunk,
+                    source_type,
+                    Severity.minor,
+                    confidence=0.98,
+                )
+            )
+        spacing = {
+            field: paragraph_expectation[field]
+            for field in ["spaceBeforePt", "spaceAfterPt"]
+            if field in paragraph_expectation
+        }
+        if spacing:
+            rules.append(
+                _rule(
+                    f"heading_{level}_paragraph_spacing",
+                    RuleCategory.paragraph,
+                    scope,
+                    selector,
+                    spacing,
+                    chunk,
+                    source_type,
+                    Severity.minor,
+                    confidence=0.98,
+                )
+            )
+    return rules
+
+
+def _heading_exemplar_level(text: str) -> int | None:
+    match = re.match(r"^\s*(\d+(?:\.\d+){0,5})\s+\S+", text)
+    if not match:
+        return None
+    return min(match.group(1).count(".") + 1, 6)
+
+
+def _looks_like_toc_entry(text: str) -> bool:
+    return bool(re.match(r"^\s*\d+(?:\.\d+){0,5}\s+.+\s+\d+\s*$", text))
+
+
+def _heading_expectation_from_formatting(formatting: dict[str, object]) -> dict[str, object]:
+    expectation: dict[str, object] = {}
+    for field in ["fontFamilyEastAsia", "fontSizePt", "bold", "alignment"]:
+        if field in formatting:
+            expectation[field] = formatting[field]
+    return expectation
+
+
+def _paragraph_expectation_from_formatting(formatting: dict[str, object]) -> dict[str, object]:
+    expectation: dict[str, object] = {}
+    expectation["firstLineIndentCm"] = formatting.get("firstLineIndentCm", 0.0)
+    expectation["spaceBeforePt"] = formatting.get("spaceBeforePt", 0.0)
+    expectation["spaceAfterPt"] = formatting.get("spaceAfterPt", 0.0)
+    expectation["alignment"] = formatting.get("alignment", "left")
+    return expectation
+
+
 def _local_rule_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandidate]:
     candidates: list[ExtractedRuleCandidate] = []
     candidates.extend(_structure_candidates(chunks))
@@ -516,7 +644,7 @@ def _toc_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandida
 
 def _caption_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandidate]:
     for chunk in chunks:
-        if any(keyword in chunk.text for keyword in ["图题", "表题", "题注", "图表"]):
+        if any(keyword in chunk.text for keyword in ["图题", "表题", "题注", "图注", "表注"]):
             return [
                 ExtractedRuleCandidate(
                     category=RuleCategory.caption,
@@ -534,7 +662,7 @@ def _caption_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCan
 
 def _reference_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandidate]:
     for chunk in chunks:
-        if any(keyword in chunk.text for keyword in ["参考文献", "著录", "GB/T", "引用"]):
+        if _is_reference_requirement(chunk.text):
             return [
                 ExtractedRuleCandidate(
                     category=RuleCategory.reference,
@@ -661,6 +789,31 @@ def _blocks_from_chunks(chunks: list[RequirementChunk]) -> list[RequirementBlock
     ]
 
 
+def _block_target_hint(block: RequirementBlock) -> str | None:
+    if block.type == "comment":
+        nearby_text = str(block.context.get("nearby_text", ""))
+        combined = f"{nearby_text} {block.text}"
+        return _target_hint_from_text(combined)
+    return _target_hint_from_text(block.text)
+
+
+def _target_hint_from_text(text: str) -> str | None:
+    if "正文段落" in text or re.search(r"(^|[（(])正文([）)]|$)", text):
+        return "body.paragraph"
+    if not _has_explicit_non_body_target(text) and _looks_like_body_format_requirement(text):
+        return "body.paragraph"
+    return None
+
+
+def _looks_like_body_format_requirement(text: str) -> bool:
+    return (
+        ("中文" in text or "宋体" in text)
+        and ("英文" in text or "数字" in text or "Times New Roman" in text)
+        and "首行缩进" in text
+        and "行距" in text
+    )
+
+
 def _font_expectation(text: str) -> dict[str, object]:
     expectation: dict[str, object] = {}
     font_family = _first_font_family(text)
@@ -701,7 +854,12 @@ def _alignment_value(text: str) -> str | None:
     return None
 
 
-def _paragraph_target(text: str) -> tuple[str, str | None]:
+def _paragraph_target(
+    text: str,
+    target_hint: str | None = None,
+) -> tuple[str, str | None]:
+    if target_hint == "body.paragraph" and not _has_explicit_non_body_target(text):
+        return "body.paragraph", None
     if "摘要" in text:
         return "abstract.paragraph", "摘要"
     if "关键词" in text:
@@ -712,7 +870,72 @@ def _paragraph_target(text: str) -> tuple[str, str | None]:
         return "heading.2", "Heading 2"
     if "三级标题" in text:
         return "heading.3", "Heading 3"
-    return "body.paragraph", "正文"
+    return "body.paragraph", None
+
+
+def _has_explicit_non_body_target(text: str) -> bool:
+    return any(
+        keyword in text
+        for keyword in [
+            "摘要",
+            "关键词",
+            "一级标题",
+            "二级标题",
+            "三级标题",
+            "目录",
+            "图题",
+            "图注",
+            "表题",
+            "表注",
+            "参考文献",
+        ]
+    )
+
+
+def _should_skip_default_body_paragraph_rule(
+    scope: str,
+    chunk: RequirementChunk,
+) -> bool:
+    if scope != "body.paragraph":
+        return False
+    if _has_non_body_format_context(chunk.text):
+        return True
+    if (
+        chunk.location
+        and chunk.location.startswith("comment:")
+        and chunk.target_hint != "body.paragraph"
+        and "正文" not in chunk.text
+    ):
+        return True
+    return False
+
+
+def _has_non_body_format_context(text: str) -> bool:
+    return any(
+        keyword in text
+        for keyword in [
+            "图题",
+            "图注",
+            "表题",
+            "表注",
+            "题注",
+            "图中",
+            "表中",
+            "公式",
+            "表达式",
+            "目录",
+            "参考文献",
+        ]
+    )
+
+
+def _is_reference_requirement(text: str) -> bool:
+    if re.search(r"(不|避免|禁止|无需|不得).{0,8}(引用|参考文献)", text):
+        return False
+    return bool(
+        "参考文献" in text
+        and re.search(r"(著录|编排|格式|编号|顺序|GB/T|列出|不少于)", text, re.I)
+    )
 
 
 def _scoped_rule_id(scope: str, suffix: str) -> str:
@@ -727,6 +950,14 @@ def _chunks_containing(
     keywords: list[str],
 ) -> list[RequirementChunk]:
     return [chunk for chunk in chunks if any(keyword in chunk.text for keyword in keywords)]
+
+
+def _body_rule_chunks(chunks: list[RequirementChunk]) -> list[RequirementChunk]:
+    return [
+        chunk
+        for chunk in chunks
+        if "正文" in chunk.text or chunk.target_hint == "body.paragraph"
+    ]
 
 
 def _page_rule(
@@ -944,16 +1175,32 @@ def _parse_location_prefix(line: str) -> tuple[str | None, str]:
 
 
 def _dedupe_rules(rules: list[FormatRule]) -> list[FormatRule]:
-    seen: set[tuple[str, str]] = set()
-    deduped: list[FormatRule] = []
+    by_id: dict[str, FormatRule] = {}
+    order: list[str] = []
     for rule in rules:
-        expectation_key = json.dumps(rule.expectation, ensure_ascii=False, sort_keys=True)
-        key = (rule.id, expectation_key)
-        if key in seen:
+        existing = by_id.get(rule.id)
+        if existing is None:
+            by_id[rule.id] = rule
+            order.append(rule.id)
             continue
-        seen.add(key)
-        deduped.append(rule)
-    return deduped
+        by_id[rule.id] = _merge_rule(existing, rule)
+    return [by_id[rule_id] for rule_id in order]
+
+
+def _merge_rule(existing: FormatRule, incoming: FormatRule) -> FormatRule:
+    expectation = dict(existing.expectation)
+    for field, value in incoming.expectation.items():
+        if field not in expectation or incoming.confidence > existing.confidence:
+            expectation[field] = value
+    confidence = max(existing.confidence, incoming.confidence)
+    source = incoming.source if incoming.confidence > existing.confidence else existing.source
+    return existing.model_copy(
+        update={
+            "expectation": expectation,
+            "confidence": confidence,
+            "source": source,
+        }
+    )
 
 
 def _dedupe_unsupported(items: list[UnsupportedRequirement]) -> list[UnsupportedRequirement]:

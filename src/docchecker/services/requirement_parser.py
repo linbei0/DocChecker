@@ -7,12 +7,25 @@ from docx.text.paragraph import Paragraph
 from lxml import etree
 
 from docchecker.domain.requirements import RequirementBlock, RequirementDocumentModel
+from docchecker.parsing.docx_parser import (
+    _alignment_name,
+    _bold,
+    _document_default_font_name,
+    _emu_to_cm,
+    _font_size_pt,
+    _line_spacing,
+    _paragraph_format_value,
+    _script_font_family,
+    _space_pt,
+)
 
 WORD_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+WORD_MAIN_PART = "word/document.xml"
 
 
 def parse_requirement_document(path: Path) -> RequirementDocumentModel:
     document = Document(path)
+    default_font_name = _document_default_font_name(document)
     blocks: list[RequirementBlock] = []
     warnings: list[str] = []
     heading_path: list[str] = []
@@ -35,6 +48,12 @@ def parse_requirement_document(path: Path) -> RequirementDocumentModel:
                     text=text,
                     style_name=style_name,
                     heading_path=heading_path.copy(),
+                    context={
+                        "formatting": _paragraph_formatting(
+                            item,
+                            default_font_name,
+                        )
+                    },
                 )
             )
         elif isinstance(item, Table):
@@ -156,6 +175,35 @@ def _header_footer_blocks(document, heading_path: list[str]) -> list[Requirement
     return blocks
 
 
+def _paragraph_formatting(paragraph: Paragraph, default_font_name: str | None) -> dict[str, object]:
+    formatting: dict[str, object] = {}
+    values = {
+        "fontFamilyEastAsia": _script_font_family(
+            paragraph,
+            default_font_name,
+            script="east_asia",
+        ),
+        "fontFamilyAscii": _script_font_family(
+            paragraph,
+            default_font_name,
+            script="ascii",
+        ),
+        "fontSizePt": _font_size_pt(paragraph),
+        "bold": _bold(paragraph),
+        "alignment": _alignment_name(_paragraph_format_value(paragraph, "alignment")),
+        "firstLineIndentCm": _emu_to_cm(
+            _paragraph_format_value(paragraph, "first_line_indent")
+        ),
+        "lineSpacing": _line_spacing(paragraph),
+        "spaceBeforePt": _space_pt(paragraph, "space_before"),
+        "spaceAfterPt": _space_pt(paragraph, "space_after"),
+    }
+    for key, value in values.items():
+        if value is not None:
+            formatting[key] = value
+    return formatting
+
+
 def _extract_comment_blocks(
     path: Path,
     context_blocks: list[RequirementBlock],
@@ -164,8 +212,12 @@ def _extract_comment_blocks(
         if "word/comments.xml" not in package.namelist():
             return []
         comments_xml = package.read("word/comments.xml")
+        document_xml = (
+            package.read(WORD_MAIN_PART) if WORD_MAIN_PART in package.namelist() else None
+        )
 
     root = etree.fromstring(comments_xml)
+    anchors = _comment_anchor_contexts(document_xml, context_blocks)
     comments: list[RequirementBlock] = []
     for comment_index, comment in enumerate(
         root.xpath("//w:comment", namespaces=WORD_NS),
@@ -175,7 +227,7 @@ def _extract_comment_blocks(
         if not text:
             continue
         comment_id = comment.get(f"{{{WORD_NS['w']}}}id") or str(comment_index)
-        nearby = _nearby_comment_context(context_blocks, text)
+        nearby = anchors.get(comment_id) or _nearby_comment_context(context_blocks, text)
         comments.append(
             RequirementBlock(
                 id=f"comment:{comment_id}",
@@ -189,6 +241,37 @@ def _extract_comment_blocks(
             )
         )
     return comments
+
+
+def _comment_anchor_contexts(
+    document_xml: bytes | None,
+    blocks: list[RequirementBlock],
+) -> dict[str, RequirementBlock]:
+    if document_xml is None:
+        return {}
+    root = etree.fromstring(document_xml)
+    paragraph_blocks = {
+        block.location: block for block in blocks if block.type == "paragraph"
+    }
+    anchors: dict[str, RequirementBlock] = {}
+    paragraph_index = 0
+    for paragraph in root.xpath("./w:body/w:p", namespaces=WORD_NS):
+        paragraph_index += 1
+        text = _normalize_text("".join(paragraph.xpath(".//w:t/text()", namespaces=WORD_NS)))
+        if not text:
+            continue
+        block = paragraph_blocks.get(f"paragraph:{paragraph_index}")
+        if block is None:
+            continue
+        comment_ids = set(
+            paragraph.xpath(".//w:commentRangeStart/@w:id", namespaces=WORD_NS)
+        )
+        comment_ids.update(
+            paragraph.xpath(".//w:commentReference/@w:id", namespaces=WORD_NS)
+        )
+        for comment_id in comment_ids:
+            anchors.setdefault(comment_id, block)
+    return anchors
 
 
 def _nearby_comment_context(

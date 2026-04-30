@@ -52,13 +52,20 @@ def _style_chain(style) -> list[object]:
     return styles
 
 
-def _font_name(font) -> str | None:
-    if font.name:
-        return font.name
-    return _r_fonts_name(getattr(font, "_element", None))
+def _font_name(font, *, script: str | None = None) -> str | None:
+    r_fonts_name = _r_fonts_name(getattr(font, "_element", None), script=script)
+    if script:
+        return _clean_font_name(r_fonts_name or font.name)
+    return _clean_font_name(font.name or r_fonts_name)
 
 
-def _r_fonts_name(element) -> str | None:
+def _clean_font_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value.split(";")[0].strip() or None
+
+
+def _r_fonts_name(element, *, script: str | None = None) -> str | None:
     r_fonts = getattr(element, "rFonts", None)
     if r_fonts is None and element is not None:
         r_fonts = element.find(qn("w:rFonts"))
@@ -66,6 +73,18 @@ def _r_fonts_name(element) -> str | None:
         r_fonts = element.find(".//" + qn("w:rFonts"))
     if r_fonts is None:
         return None
+    if script == "east_asia":
+        return (
+            r_fonts.get(qn("w:eastAsia"))
+            or r_fonts.get(qn("w:hAnsi"))
+            or r_fonts.get(qn("w:ascii"))
+        )
+    if script == "ascii":
+        return (
+            r_fonts.get(qn("w:ascii"))
+            or r_fonts.get(qn("w:hAnsi"))
+            or r_fonts.get(qn("w:eastAsia"))
+        )
     return (
         r_fonts.get(qn("w:eastAsia"))
         or r_fonts.get(qn("w:hAnsi"))
@@ -117,16 +136,22 @@ def _has_bool_property(element, name: str) -> bool:
     return value not in {"0", "false", "False"}
 
 
-def _run_style_font_name(run, paragraph, default_font_name: str | None) -> str | None:
-    value = _font_name(run.font)
+def _run_style_font_name(
+    run,
+    paragraph,
+    default_font_name: str | None,
+    *,
+    script: str | None = None,
+) -> str | None:
+    value = _font_name(run.font, script=script)
     if value:
         return value
     for style in _style_chain(getattr(run, "style", None)):
-        value = _font_name(style.font)
+        value = _font_name(style.font, script=script)
         if value:
             return value
     for style in _style_chain(getattr(paragraph, "style", None)):
-        value = _font_name(style.font)
+        value = _font_name(style.font, script=script)
         if value:
             return value
     return default_font_name
@@ -160,7 +185,15 @@ def _script_font_family(
         name
         for run in paragraph.runs
         if _run_contains_script(run.text, script)
-        and (name := _run_style_font_name(run, paragraph, default_font_name)) is not None
+        and (
+            name := _run_style_font_name(
+                run,
+                paragraph,
+                default_font_name,
+                script=script,
+            )
+        )
+        is not None
     ]
     return _single_value(names)
 
@@ -175,7 +208,12 @@ def _script_font_families(
     for run in paragraph.runs:
         if not _run_contains_script(run.text, script):
             continue
-        name = _run_style_font_name(run, paragraph, default_font_name)
+        name = _run_style_font_name(
+            run,
+            paragraph,
+            default_font_name,
+            script=script,
+        )
         if name and name not in names:
             names.append(name)
     return names

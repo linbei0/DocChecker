@@ -1,3 +1,5 @@
+import re
+
 from docchecker.checkers.base import relevant_rules
 from docchecker.checkers.finding_context import (
     paragraph_context,
@@ -20,7 +22,7 @@ class FontChecker:
         for rule in relevant_rules(rules, self.supported_categories):
             for paragraph in _matching_paragraphs(document, rule):
                 for field, expected in rule.expectation.items():
-                    actual = _actual_value(paragraph, field, expected)
+                    actual = _actual_value(paragraph, field, expected, rule.target.scope)
                     if actual is None:
                         findings.append(
                             self._finding(
@@ -79,19 +81,14 @@ def _matching_paragraphs(document: DocumentModel, rule: FormatRule) -> list[Para
     selector = rule.target.selector
     paragraphs = [p for p in document.paragraphs if p.text.strip()]
     if rule.target.scope.startswith("heading"):
-        heading_paragraphs = [
+        return [
             p
             for p in paragraphs
-            if (p.style_name or "").lower().startswith("heading")
+            if not _is_toc_paragraph(document, p)
+            and _matches_heading_level(p, rule.target.scope, selector)
         ]
-        if not selector:
-            return heading_paragraphs
-        selected = [
-            p
-            for p in heading_paragraphs
-            if p.style_name == selector or p.text.strip() == selector
-        ]
-        return selected or heading_paragraphs
+    if rule.target.scope.startswith("body"):
+        return [p for p in paragraphs if _is_body_paragraph(document, p)]
     if selector:
         return [
             p
@@ -99,6 +96,73 @@ def _matching_paragraphs(document: DocumentModel, rule: FormatRule) -> list[Para
             if p.style_name == selector or selector in p.text
         ]
     return paragraphs
+
+
+def _matches_heading_level(
+    paragraph: ParagraphNode,
+    scope: str,
+    selector: str | None,
+) -> bool:
+    style_name = paragraph.style_name or ""
+    if selector and style_name == selector:
+        return True
+    expected_level = _heading_level(scope, selector)
+    if expected_level is None:
+        return style_name.lower().startswith("heading")
+    style_level = _style_heading_level(style_name)
+    if style_level is not None:
+        return style_level == expected_level
+    text_level = _numbered_heading_level(paragraph.text)
+    return text_level == expected_level
+
+
+def _heading_level(scope: str, selector: str | None) -> int | None:
+    for value in [scope, selector or ""]:
+        if match := re.search(r"(?:heading[ .]?|heading\.)([1-6])", value, re.I):
+            return int(match.group(1))
+    return None
+
+
+def _style_heading_level(style_name: str) -> int | None:
+    if match := re.search(r"heading\s*([1-6])", style_name, re.I):
+        return int(match.group(1))
+    return None
+
+
+def _numbered_heading_level(text: str) -> int | None:
+    if re.match(r"^\s*\d+(?:\.\d+){0,5}\s+.+\s+\d+\s*$", text):
+        return None
+    if match := re.match(r"^\s*\d+(?:\.\d+){0,5}(?=\s|\t|$)", text):
+        return match.group(0).count(".") + 1
+    return None
+
+
+def _is_toc_paragraph(document: DocumentModel, paragraph: ParagraphNode) -> bool:
+    return any(
+        section.role == "toc"
+        and section.start_paragraph_index <= paragraph.index <= (section.end_paragraph_index or paragraph.index)
+        for section in document.logical_sections
+    )
+
+
+def _is_body_paragraph(document: DocumentModel, paragraph: ParagraphNode) -> bool:
+    in_body_section = any(
+        section.role == "body"
+        and section.start_paragraph_index <= paragraph.index <= (section.end_paragraph_index or paragraph.index)
+        for section in document.logical_sections
+    )
+    if not in_body_section:
+        return False
+    if _is_toc_paragraph(document, paragraph):
+        return False
+    if _matches_heading_level(paragraph, "heading", None):
+        return False
+    return not _is_caption_paragraph(paragraph)
+
+
+def _is_caption_paragraph(paragraph: ParagraphNode) -> bool:
+    text = paragraph.text.strip()
+    return bool(re.match(r"^(续)?(图|表)\s*\d+(?:[.-]\d+)*\s+.+", text))
 
 
 def _field_name(field: str) -> str:
@@ -110,8 +174,10 @@ def _field_name(field: str) -> str:
     }.get(field, field)
 
 
-def _actual_value(paragraph: ParagraphNode, field: str, expected):
+def _actual_value(paragraph: ParagraphNode, field: str, expected, scope: str = ""):
     if field == "fontFamilyEastAsia":
+        if scope.startswith("keywords"):
+            return _keyword_font_value(paragraph, expected)
         if isinstance(expected, str) and _is_latin_font(expected):
             return (
                 paragraph.font_family_ascii
@@ -123,7 +189,58 @@ def _actual_value(paragraph: ParagraphNode, field: str, expected):
             or _mixed_font_value(paragraph.raw.get("font_family_east_asia_values"))
             or paragraph.font_family
         )
+    if field == "bold":
+        return paragraph.bold if paragraph.bold is not None else False
     return getattr(paragraph, _field_name(field), None)
+
+
+def _keyword_font_value(paragraph: ParagraphNode, expected):
+    content_runs = _keyword_content_runs(paragraph)
+    if isinstance(expected, str) and _is_latin_font(expected):
+        return _single_or_mixed(
+            run.font_family_ascii
+            for run in content_runs
+            if run.script in {"ascii", "mixed"} and run.font_family_ascii
+        )
+    east_asia_fonts = [
+        run.font_family_east_asia
+        for run in content_runs
+        if run.script in {"east_asia", "mixed"}
+        and run.font_family_east_asia
+        and not _is_latin_font(run.font_family_east_asia)
+    ]
+    if not east_asia_fonts and _has_east_asia_text(content_runs):
+        return expected
+    return _single_or_mixed(east_asia_fonts)
+
+
+def _keyword_content_runs(paragraph: ParagraphNode):
+    runs = list(paragraph.runs)
+    if runs and runs[0].text.strip().startswith(("关键词", "关键字")):
+        first = runs[0].model_copy()
+        _, separator, tail = first.text.partition("：")
+        if not separator:
+            _, separator, tail = first.text.partition(":")
+        if separator:
+            first.text = tail
+            runs = ([first] if tail else []) + runs[1:]
+        else:
+            runs = runs[1:]
+    return runs
+
+
+def _single_or_mixed(values) -> str | None:
+    names: list[str] = []
+    for value in values:
+        if value and value not in names:
+            names.append(str(value))
+    if len(names) <= 1:
+        return names[0] if names else None
+    return "混合：" + "、".join(names)
+
+
+def _has_east_asia_text(runs) -> bool:
+    return any(run.script in {"east_asia", "mixed"} for run in runs)
 
 
 def _mixed_font_value(values) -> str | None:
