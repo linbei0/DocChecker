@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
   CheckCircle,
+  ChevronDown,
   Edit2,
-  Eye,
   XCircle,
 } from 'lucide-react'
 import { Button } from '@/shared/ui/Button'
@@ -87,17 +87,17 @@ export function RuleConfirmPage() {
       prev.map((rule) =>
         predicate(rule)
           ? {
-              ...rule,
-              enabled,
-              capability_status:
-                enabled && rule.capability_status === 'needs_confirmation'
-                  ? 'auto_checkable'
-                  : rule.capability_status,
-              confirmation_required:
-                enabled && rule.capability_status === 'needs_confirmation'
-                  ? false
-                  : rule.confirmation_required,
-            }
+            ...rule,
+            enabled,
+            capability_status:
+              enabled && rule.capability_status === 'needs_confirmation'
+                ? 'auto_checkable'
+                : rule.capability_status,
+            confirmation_required:
+              enabled && rule.capability_status === 'needs_confirmation'
+                ? false
+                : rule.confirmation_required,
+          }
           : rule,
       ),
     )
@@ -148,23 +148,32 @@ export function RuleConfirmPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-12 text-sm text-neutral-500">
-        加载候选规则中...
+      <div className="mx-auto flex max-w-7xl items-center justify-center px-4 py-20 text-sm text-neutral-500 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-300 border-t-primary-600" />
+          加载候选规则中...
+        </div>
       </div>
     )
   }
 
   if (!draft) {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-12 text-center">
-        <AlertCircle className="mx-auto h-10 w-10 text-neutral-300" />
-        <p className="mt-4 text-sm text-neutral-600">候选规则集不存在或已过期。</p>
-        <Link
-          to="/checks/new"
-          className="mt-4 inline-block text-sm text-primary-600 hover:underline"
-        >
-          返回新建检查
-        </Link>
+      <div className="mx-auto max-w-7xl px-4 py-20 text-center sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-md">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-100">
+            <AlertCircle className="h-8 w-8 text-neutral-400" />
+          </div>
+          <h2 className="mt-6 text-lg font-semibold text-neutral-900">候选规则集不存在</h2>
+          <p className="mt-2 text-sm text-neutral-500">该规则集可能已过期或已被删除。</p>
+          <Link
+            to="/checks/new"
+            className="mt-6 inline-flex items-center text-sm font-medium text-primary-600 hover:text-primary-700"
+          >
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            返回新建检查
+          </Link>
+        </div>
       </div>
     )
   }
@@ -178,17 +187,18 @@ export function RuleConfirmPage() {
     .map((item) => item.rule)
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-neutral-900">确认规则</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-2xl">
+          <h1 className="text-xl font-bold tracking-tight text-neutral-900 sm:text-2xl">确认规则</h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-neutral-500">
             所有规则诊断、人工确认和不可校验说明都在同一工作台里完成。
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <Button variant="secondary" onClick={() => navigate(-1)}>
-            <ArrowLeft className="mr-1 h-4 w-4" />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             返回上一步
           </Button>
           <Button
@@ -201,42 +211,50 @@ export function RuleConfirmPage() {
             }
           >
             确认并检查
-            <ArrowRight className="ml-1 h-4 w-4" />
+            <ArrowRight className="ml-1.5 h-4 w-4" />
           </Button>
         </div>
       </div>
 
+      {/* Error Alert */}
       {error && (
-        <div className="mb-4 rounded-lg border border-danger-50 bg-danger-50 p-3 text-sm text-danger-600">
-          {error}
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-danger-100 bg-danger-50 px-4 py-3.5 text-sm text-danger-700 shadow-sm animate-in slide-in-from-top-1">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger-500" />
+          <span className="leading-relaxed">{error}</span>
         </div>
       )}
 
+      {/* Parse Warnings */}
       {draft.parse_warnings.length > 0 && (
-        <div className="mb-4 rounded-lg border border-warning-50 bg-warning-50 p-3 text-sm text-warning-700">
-          {draft.parse_warnings.join('；')}
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-warning-100 bg-warning-50 px-4 py-3.5 text-sm text-warning-800 shadow-sm animate-in slide-in-from-top-1">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-500" />
+          <span className="leading-relaxed">{draft.parse_warnings.join('；')}</span>
         </div>
       )}
 
+      {/* Summary Metrics */}
       {summary && (
-        <div className="mb-4 grid gap-3 sm:grid-cols-4">
-          <SummaryMetric label="识别到要求" value={summary.total_requirements} />
-          <SummaryMetric label="可自动校验" value={summary.structured_rules} tone="success" />
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4">
+          <SummaryMetric label="识别到要求" value={summary.total_requirements} icon={<CheckCircle className="h-4 w-4 text-neutral-400" />} />
+          <SummaryMetric label="可自动校验" value={summary.structured_rules} tone="success" icon={<CheckCircle className="h-4 w-4 text-success-500" />} />
           <SummaryMetric
             label="需人工确认"
             value={summary.needs_confirmation_rules ?? summary.low_confidence_rules}
             tone="warning"
+            icon={<AlertCircle className="h-4 w-4 text-warning-500" />}
           />
-          <SummaryMetric label="当前不可校验" value={summary.unsupported_requirements} tone="danger" />
+          <SummaryMetric label="当前不可校验" value={summary.unsupported_requirements} tone="danger" icon={<XCircle className="h-4 w-4 text-danger-500" />} />
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
-        <div className="border-b border-neutral-200 px-6 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Main Workbench */}
+      <div className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-sm">
+        {/* Workbench Header */}
+        <div className="border-b border-neutral-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-sm font-medium text-neutral-900">规则诊断与确认工作台</h2>
-              <p className="mt-1 text-xs text-neutral-500">
+              <h2 className="text-base font-semibold text-neutral-900">规则诊断与确认工作台</h2>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-500">
                 在同一列表里处理自动规则、人工确认项和当前不可校验项。
               </p>
             </div>
@@ -246,8 +264,9 @@ export function RuleConfirmPage() {
                 size="sm"
                 onClick={() => setRulesEnabled(true, (rule) => visibleRules.includes(rule))}
                 disabled={visibleRules.length === 0}
+                className="text-success-600 hover:bg-success-50 hover:text-success-700"
               >
-                <CheckCircle className="mr-1 h-4 w-4" />
+                <CheckCircle className="mr-1.5 h-4 w-4" />
                 启用当前筛选
               </Button>
               <Button
@@ -255,64 +274,66 @@ export function RuleConfirmPage() {
                 size="sm"
                 onClick={() => setRulesEnabled(false, (rule) => visibleRules.includes(rule))}
                 disabled={visibleRules.length === 0}
+                className="text-danger-600 hover:bg-danger-50 hover:text-danger-700"
               >
-                <XCircle className="mr-1 h-4 w-4" />
+                <XCircle className="mr-1.5 h-4 w-4" />
                 禁用当前筛选
               </Button>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          {/* Filter Tabs */}
+          <div className="mt-5 flex flex-wrap gap-2">
             {FILTER_OPTIONS.map((option) => (
-              <button
+              <FilterPill
                 key={option.id}
+                active={activeFilter === option.id}
                 onClick={() => setActiveFilter(option.id)}
-                className={cn(
-                  'rounded-full border px-3 py-1.5 text-xs transition-colors',
-                  activeFilter === option.id
-                    ? 'border-primary-600 bg-primary-50 text-primary-700'
-                    : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50',
-                )}
-              >
-                {option.label}
-                <span className="ml-1 text-neutral-400">{countByFilter(reviewItems, option.id)}</span>
-              </button>
+                label={option.label}
+                count={countByFilter(reviewItems, option.id)}
+              />
             ))}
           </div>
         </div>
 
+        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+            <thead>
+              <tr className="border-b border-neutral-100 bg-neutral-50/80">
+                <th className="w-[72px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   状态
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="w-[100px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   类别
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="w-[110px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   能力状态
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="w-[140px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   适用范围
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="min-w-[240px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   内容
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="w-[90px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   严重度
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-neutral-500">
+                <th className="w-[72px] px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-6">
                   操作
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-200">
+            <tbody className="divide-y divide-neutral-100">
               {visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-neutral-400">
-                    当前筛选下没有项目。
+                  <td colSpan={7} className="px-6 py-16 text-center">
+                    <div className="flex flex-col items-center gap-3 text-neutral-400">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-100">
+                        <AlertCircle className="h-6 w-6 text-neutral-300" />
+                      </div>
+                      <p className="text-sm">当前筛选下没有项目。</p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -394,27 +415,115 @@ function countByFilter(items: ReviewItem[], filter: ReviewFilter): number {
   return items.filter((item) => matchesFilter(item, filter)).length
 }
 
+/* ─── Sub-components ─── */
+
 function SummaryMetric({
   label,
   value,
   tone = 'neutral',
+  icon,
 }: {
   label: string
   value: number
   tone?: 'neutral' | 'success' | 'warning' | 'danger'
+  icon?: React.ReactNode
 }) {
-  const toneClass = {
-    neutral: 'text-neutral-900',
-    success: 'text-success-600',
-    warning: 'text-warning-700',
-    danger: 'text-danger-600',
+  const toneStyles = {
+    neutral: {
+      value: 'text-neutral-900',
+      iconBg: 'bg-neutral-100',
+    },
+    success: {
+      value: 'text-success-600',
+      iconBg: 'bg-success-50',
+    },
+    warning: {
+      value: 'text-warning-600',
+      iconBg: 'bg-warning-50',
+    },
+    danger: {
+      value: 'text-danger-600',
+      iconBg: 'bg-danger-50',
+    },
   }[tone]
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <p className="text-xs text-neutral-500">{label}</p>
-      <p className={cn('mt-1 text-2xl font-semibold', toneClass)}>{value}</p>
+    <div className="group relative overflow-hidden rounded-2xl border border-neutral-200/80 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md hover:border-neutral-300 sm:p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-medium text-neutral-500">{label}</p>
+          <p className={cn('mt-2 text-3xl font-bold tracking-tight tabular-nums', toneStyles.value)}>
+            {value}
+          </p>
+        </div>
+        {icon && (
+          <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg transition-colors', toneStyles.iconBg)}>
+            {icon}
+          </div>
+        )}
+      </div>
     </div>
+  )
+}
+
+function FilterPill({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  count: number
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-200',
+        active
+          ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm'
+          : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50',
+      )}
+    >
+      {label}
+      <span
+        className={cn(
+          'ml-1.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums',
+          active ? 'bg-primary-100 text-primary-700' : 'bg-neutral-100 text-neutral-500',
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function ToggleSwitch({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      role="switch"
+      aria-checked={enabled}
+      className={cn(
+        'relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2',
+        enabled ? 'bg-primary-600' : 'bg-neutral-300',
+      )}
+    >
+      <span
+        className={cn(
+          'inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-out',
+          enabled ? 'translate-x-[18px]' : 'translate-x-[2px]',
+        )}
+      />
+    </button>
   )
 }
 
@@ -427,61 +536,79 @@ function UnsupportedRow({
   expanded: boolean
   onExpand: () => void
 }) {
+  const contentRef = useRef<HTMLTableCellElement>(null)
+
   return (
     <>
-      <tr className="transition-colors hover:bg-neutral-50">
-        <td className="px-6 py-4">
-          <span className="rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-500">
+      <tr className="group transition-colors duration-150 hover:bg-neutral-50/80">
+        <td className="px-4 py-3.5 sm:px-6">
+          <span className="inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-1 text-[11px] font-medium text-neutral-500">
             不可启用
           </span>
         </td>
-        <td className="px-6 py-4 text-neutral-900">{requirement.category}</td>
-        <td className="px-6 py-4">
-          <span className="rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700">
+        <td className="px-4 py-3.5 text-sm font-medium text-neutral-900 sm:px-6">
+          {requirement.category}
+        </td>
+        <td className="px-4 py-3.5 sm:px-6">
+          <span className="inline-flex items-center rounded-full bg-warning-50 px-2.5 py-1 text-[11px] font-medium text-warning-700">
             {capabilityStatusLabel(requirement.capability_status || 'unsupported')}
           </span>
         </td>
-        <td className="px-6 py-4 text-neutral-700">
-          {requirement.target_scope || requirement.location || '未定位'}
+        <td className="px-4 py-3.5 text-sm text-neutral-600 sm:px-6">
+          <span className="line-clamp-1">{requirement.target_scope || requirement.location || '未定位'}</span>
         </td>
-        <td className="px-6 py-4 text-neutral-700">{requirement.excerpt}</td>
-        <td className="px-6 py-4">
-          <span className="rounded-full border border-neutral-200 px-2 py-0.5 text-xs text-neutral-500">
+        <td className="px-4 py-3.5 text-sm text-neutral-700 sm:px-6">
+          <span className="line-clamp-2">{requirement.excerpt}</span>
+        </td>
+        <td className="px-4 py-3.5 sm:px-6">
+          <span className="inline-flex items-center rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
             说明
           </span>
         </td>
-        <td className="px-6 py-4 text-right">
+        <td className="px-4 py-3.5 text-right sm:px-6">
           <button
             onClick={onExpand}
-            className="rounded-md p-1 text-neutral-400 hover:bg-neutral-200"
+            className={cn(
+              'inline-flex items-center justify-center rounded-lg p-1.5 text-neutral-400 transition-all duration-150 hover:bg-neutral-100 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30',
+              expanded && 'bg-neutral-100 text-neutral-600',
+            )}
+            aria-label={expanded ? '收起详情' : '展开详情'}
           >
-            <Eye className="h-4 w-4" />
+            <ChevronDown className={cn('h-4 w-4 transition-transform duration-200', expanded && 'rotate-180')} />
           </button>
         </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} className="border-t border-neutral-100 bg-neutral-50 px-6 py-4">
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <div>
-                <p className="text-xs text-neutral-500">原始要求</p>
-                <p className="mt-2 rounded-lg border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+          <td
+            ref={contentRef}
+            colSpan={7}
+            className="border-t border-neutral-100 bg-neutral-50/60 px-4 py-5 sm:px-6"
+          >
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-neutral-400" />
+                  <p className="text-xs font-semibold text-neutral-700">原始要求</p>
+                </div>
+                <p className="rounded-xl border border-neutral-200/80 bg-white p-4 text-sm leading-relaxed text-neutral-700 shadow-sm">
                   {requirement.excerpt}
                 </p>
-                <p className="mt-2 text-xs text-neutral-500">
-                  来源位置：{requirement.location || '未定位'}
-                </p>
-                {requirement.reason_code && (
-                  <p className="mt-2 text-xs text-neutral-500">
-                    诊断类型：{reasonCodeLabel(requirement.reason_code)}
-                  </p>
-                )}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">
+                  <span>来源位置：{requirement.location || '未定位'}</span>
+                  {requirement.reason_code && (
+                    <span>诊断类型：{reasonCodeLabel(requirement.reason_code)}</span>
+                  )}
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-neutral-500">当前状态说明</p>
-                <div className="mt-2 rounded-lg border border-warning-100 bg-white p-3 text-sm text-neutral-700">
-                  <p>{requirement.reason}</p>
-                  <p className="mt-2 text-xs text-warning-700">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-warning-400" />
+                  <p className="text-xs font-semibold text-neutral-700">当前状态说明</p>
+                </div>
+                <div className="rounded-xl border border-warning-100 bg-white p-4 shadow-sm">
+                  <p className="text-sm leading-relaxed text-neutral-700">{requirement.reason}</p>
+                  <p className="mt-3 text-xs leading-relaxed text-warning-700">
                     {unsupportedActionHint(requirement)}
                   </p>
                 </div>
@@ -519,85 +646,89 @@ function RuleRow({
   onSaveEdit: () => void
   onSeverityChange: (value: FormatRule['severity']) => void
 }) {
+  const isEnabled = rule.enabled !== false
+  const expectationStr = Object.entries(rule.expectation)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(', ')
+
   return (
     <>
-      <tr className={cn('transition-colors hover:bg-neutral-50', rule.enabled === false && 'opacity-60')}>
-        <td className="px-6 py-4">
-          <button
-            onClick={onToggle}
-            className={cn(
-              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-              rule.enabled !== false ? 'bg-primary-600' : 'bg-neutral-300',
-            )}
-          >
-            <span
-              className={cn(
-                'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
-                rule.enabled !== false ? 'translate-x-5' : 'translate-x-1',
-              )}
-            />
-          </button>
+      <tr
+        className={cn(
+          'group transition-colors duration-150',
+          isEnabled ? 'hover:bg-neutral-50/80' : 'bg-neutral-50/40 hover:bg-neutral-50/60',
+        )}
+      >
+        <td className="px-4 py-3.5 sm:px-6">
+          <ToggleSwitch enabled={isEnabled} onToggle={onToggle} />
         </td>
-        <td className="px-6 py-4 text-neutral-900">{rule.category}</td>
-        <td className="px-6 py-4">
-          <span
-            className={cn(
-              'rounded-full px-2 py-0.5 text-xs',
-              rule.capability_status === 'needs_confirmation'
-                ? 'bg-warning-50 text-warning-700'
-                : 'bg-success-50 text-success-700',
-            )}
-          >
-            {capabilityStatusLabel(rule.capability_status || 'auto_checkable')}
+        <td className="px-4 py-3.5 text-sm font-medium text-neutral-900 sm:px-6">
+          {rule.category}
+        </td>
+        <td className="px-4 py-3.5 sm:px-6">
+          <CapabilityBadge status={rule.capability_status || 'auto_checkable'} />
+        </td>
+        <td className="px-4 py-3.5 text-sm text-neutral-600 sm:px-6">
+          <span className="line-clamp-1">{rule.target.selector || rule.target.scope}</span>
+        </td>
+        <td className="px-4 py-3.5 text-sm text-neutral-700 sm:px-6">
+          <span className={cn('line-clamp-2', !isEnabled && 'text-neutral-400')} title={expectationStr}>
+            {expectationStr}
           </span>
         </td>
-        <td className="px-6 py-4 text-neutral-700">{rule.target.selector || rule.target.scope}</td>
-        <td className="px-6 py-4 text-neutral-700">
-          {Object.entries(rule.expectation)
-            .map(([key, value]) => `${key}: ${String(value)}`)
-            .join(', ')}
-        </td>
-        <td className="px-6 py-4">
+        <td className="px-4 py-3.5 sm:px-6">
           <SeverityBadge severity={rule.severity} />
         </td>
-        <td className="px-6 py-4 text-right">
+        <td className="px-4 py-3.5 text-right sm:px-6">
           <button
             onClick={onExpand}
-            className="rounded-md p-1 text-neutral-400 hover:bg-neutral-200"
+            className={cn(
+              'inline-flex items-center justify-center rounded-lg p-1.5 text-neutral-400 transition-all duration-150 hover:bg-neutral-100 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30',
+              expanded && 'bg-neutral-100 text-neutral-600',
+            )}
+            aria-label={expanded ? '收起详情' : '编辑规则'}
           >
-            <Edit2 className="h-4 w-4" />
+            {expanded ? (
+              <ChevronDown className="h-4 w-4 transition-transform duration-200" />
+            ) : (
+              <Edit2 className="h-4 w-4" />
+            )}
           </button>
         </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={7} className="border-t border-neutral-100 bg-neutral-50 px-6 py-4">
-            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <div>
-                <p className="text-xs text-neutral-500">来源片段</p>
-                <p className="mt-2 rounded-lg border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+          <td colSpan={7} className="border-t border-neutral-100 bg-neutral-50/60 px-4 py-5 sm:px-6">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-primary-400" />
+                  <p className="text-xs font-semibold text-neutral-700">来源片段</p>
+                </div>
+                <p className="rounded-xl border border-neutral-200/80 bg-white p-4 text-sm leading-relaxed text-neutral-700 shadow-sm">
                   {rule.source.excerpt || '无来源片段'}
                 </p>
-                <p className="mt-2 text-xs text-neutral-500">
-                  来源位置：{rule.source.location || '未定位'} · 置信度：
-                  {Math.round((rule.confidence ?? 1) * 100)}%
-                  {' · '}证据类型：{evidenceTypeLabel(rule.source.evidence_type || 'explicit_text')}
-                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">
+                  <span>来源位置：{rule.source.location || '未定位'}</span>
+                  <span>置信度：{Math.round((rule.confidence ?? 1) * 100)}%</span>
+                  <span>证据类型：{evidenceTypeLabel(rule.source.evidence_type || 'explicit_text')}</span>
+                </div>
                 {rule.capability_status === 'needs_confirmation' && (
-                  <p className="mt-2 rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">
+                  <div className="flex items-start gap-2.5 rounded-xl bg-warning-50 px-4 py-3 text-xs leading-relaxed text-warning-700">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-500" />
                     这条规则需要你人工确认后再启用。编辑期望值并打开左侧开关后，它才会参与正式检查。
-                  </p>
+                  </div>
                 )}
               </div>
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="text-xs text-neutral-500">严重度</span>
+              <div className="space-y-4">
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-neutral-700">严重度</span>
                   <select
                     value={rule.severity}
                     onChange={(event) =>
                       onSeverityChange(event.target.value as FormatRule['severity'])
                     }
-                    className="mt-2 block w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm"
+                    className="block w-full rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-800 shadow-sm transition-colors focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                   >
                     <option value="blocker">阻断</option>
                     <option value="major">严重</option>
@@ -606,15 +737,15 @@ function RuleRow({
                   </select>
                 </label>
                 {editing ? (
-                  <div>
-                    <span className="text-xs text-neutral-500">期望值 JSON</span>
+                  <div className="space-y-2">
+                    <span className="text-xs font-semibold text-neutral-700">期望值 JSON</span>
                     <textarea
                       value={expectationText}
                       onChange={(event) => onExpectationTextChange(event.target.value)}
                       rows={5}
-                      className="mt-2 w-full rounded-lg border border-neutral-200 bg-white p-3 font-mono text-xs"
+                      className="w-full rounded-xl border border-neutral-200 bg-white p-3.5 font-mono text-xs leading-relaxed text-neutral-800 shadow-sm transition-colors focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                     />
-                    <div className="mt-2 flex gap-2">
+                    <div className="flex gap-2 pt-1">
                       <Button size="sm" onClick={onSaveEdit}>
                         保存
                       </Button>
@@ -625,6 +756,7 @@ function RuleRow({
                   </div>
                 ) : (
                   <Button size="sm" variant="secondary" onClick={onEdit}>
+                    <Edit2 className="mr-1.5 h-3.5 w-3.5" />
                     编辑期望值
                   </Button>
                 )}
@@ -634,6 +766,23 @@ function RuleRow({
         </tr>
       )}
     </>
+  )
+}
+
+function CapabilityBadge({ status }: { status: string }) {
+  const styles =
+    status === 'needs_confirmation'
+      ? 'bg-warning-50 text-warning-700 border-warning-100'
+      : status === 'auto_checkable'
+        ? 'bg-success-50 text-success-700 border-success-100'
+        : status === 'conflict'
+          ? 'bg-danger-50 text-danger-700 border-danger-100'
+          : 'bg-neutral-100 text-neutral-600 border-neutral-200'
+
+  return (
+    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium', styles)}>
+      {capabilityStatusLabel(status)}
+    </span>
   )
 }
 
@@ -679,7 +828,7 @@ function evidenceTypeLabel(type: string) {
 
 function unsupportedActionHint(requirement: UnsupportedRequirement) {
   if (requirement.capability_status === 'conflict') {
-    return '这类项通常对应同目标的冲突规则。请优先在“建议人工确认”筛选里确认最终可执行规则。'
+    return '这类项通常对应同目标的冲突规则。请优先在"建议人工确认"筛选里确认最终可执行规则。'
   }
   if (requirement.capability_status === 'needs_confirmation') {
     return '这类项本身还没有形成可执行规则，不能直接启用，需要先补充更明确的规则表达。'

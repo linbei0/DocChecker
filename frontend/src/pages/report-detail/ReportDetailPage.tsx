@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router'
 import {
   AlertCircle,
@@ -469,7 +470,9 @@ function ProblemSection({ section }: { section: FragmentSection }) {
                         rowSpan={group.findings.length}
                         className="border-l border-neutral-200 px-5 py-4 align-middle text-neutral-900"
                       >
-                        <span className="line-clamp-4">{group.excerpt}</span>
+                        <Tooltip content={group.excerpt}>
+                          <span className="line-clamp-4">{group.excerpt}</span>
+                        </Tooltip>
                       </td>
                     </>
                   )}
@@ -537,6 +540,68 @@ function IssueDetail({
         </span>
       )}
     </div>
+  )
+}
+
+function Tooltip({ content, children }: { content: string; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false)
+  const triggerRef = useRef<HTMLSpanElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+
+  const updatePosition = () => {
+    if (!triggerRef.current || !tooltipRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const tooltipRect = tooltipRef.current.getBoundingClientRect()
+    let top = rect.bottom + 8
+    let left = rect.left
+
+    if (left + tooltipRect.width > window.innerWidth - 16) {
+      left = window.innerWidth - tooltipRect.width - 16
+    }
+    if (left < 16) left = 16
+    if (top + tooltipRect.height > window.innerHeight - 16) {
+      top = rect.top - tooltipRect.height - 8
+    }
+
+    setPos({ top, left })
+  }
+
+  useEffect(() => {
+    if (visible) {
+      const raf = requestAnimationFrame(updatePosition)
+      return () => cancelAnimationFrame(raf)
+    }
+  }, [visible])
+
+  const handleEnter = () => {
+    setVisible(true)
+  }
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={handleEnter}
+        onMouseLeave={() => setVisible(false)}
+        onFocus={handleEnter}
+        onBlur={() => setVisible(false)}
+        className="cursor-help"
+      >
+        {children}
+      </span>
+      {visible &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className="fixed z-[9999] max-w-md rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-3 text-sm leading-relaxed text-white shadow-2xl"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
+    </>
   )
 }
 
