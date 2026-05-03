@@ -110,6 +110,24 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     assert rulesets_response.status_code == 200
     assert any(item["id"] == ruleset_id for item in rulesets_response.json())
 
+    rename_response = client.patch(
+        f"/api/rulesets/{ruleset_id}",
+        json={"name": "学校论文格式模板"},
+    )
+    assert rename_response.status_code == 200
+    renamed_ruleset = rename_response.json()
+    assert renamed_ruleset["name"] == "学校论文格式模板"
+    assert renamed_ruleset["rules"]
+
+    main.state_store = SqliteStateStore(main.state_store.path)
+    main.state_store.initialize()
+    renamed_list_response = client.get("/api/rulesets")
+    assert renamed_list_response.status_code == 200
+    assert any(
+        item["id"] == ruleset_id and item["name"] == "学校论文格式模板"
+        for item in renamed_list_response.json()
+    )
+
 
 def test_upload_document_accepts_doc_after_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "prepare_word_document", _fake_prepare_doc_upload)

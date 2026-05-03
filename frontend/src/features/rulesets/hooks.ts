@@ -6,6 +6,7 @@ import {
   getDraftRuleSet,
   listRuleSets,
   publishDraftRuleSet,
+  updateRuleSet,
   updateDraftRuleSet,
 } from './api'
 
@@ -22,6 +23,17 @@ export function useCreateRuleSetMutation() {
     mutationFn: createRuleSet,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.all })
+    },
+  })
+}
+
+export function useUpdateRuleSetMutation(rulesetId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: updateRuleSet.bind(null, rulesetId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.all })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.detail(rulesetId) })
     },
   })
 }

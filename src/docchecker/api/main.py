@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from docchecker.core.config import get_settings
 from docchecker.domain.document import UploadedDocumentRecord
@@ -64,6 +64,20 @@ class CreateCheckTaskRequest(BaseModel):
 
     document_id: str
     ruleset_id: str
+
+
+class UpdateRuleSetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("模板名称不能为空。")
+        return name
 
 
 class CreateDraftRuleSetRequest(BaseModel):
@@ -184,6 +198,16 @@ def create_ruleset(ruleset: RuleSet) -> RuleSet:
 @app.get("/api/rulesets", response_model=list[RuleSet])
 def list_rulesets() -> list[RuleSet]:
     return state_store.list_rulesets()
+
+
+@app.patch("/api/rulesets/{ruleset_id}", response_model=RuleSet)
+def update_ruleset(ruleset_id: str, request: UpdateRuleSetRequest) -> RuleSet:
+    ruleset = state_store.get_ruleset(ruleset_id)
+    if not ruleset:
+        raise HTTPException(status_code=404, detail="规则集不存在。")
+    updated = ruleset.model_copy(update={"name": request.name}, deep=True)
+    state_store.save_ruleset(updated)
+    return updated
 
 
 @app.post("/api/draft-rulesets", response_model=DraftRuleSet)

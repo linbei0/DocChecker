@@ -22,6 +22,10 @@ export interface UpdateDraftRuleSetRequest {
   parse_warnings?: string[]
 }
 
+export interface UpdateRuleSetRequest {
+  name: string
+}
+
 export async function createRuleSet(ruleset: RuleSet): Promise<RuleSet> {
   return apiRequest('/api/rulesets', ruleSetSchema, {
     method: 'POST',
@@ -32,6 +36,16 @@ export async function createRuleSet(ruleset: RuleSet): Promise<RuleSet> {
 export async function listRuleSets(): Promise<RuleSet[]> {
   const schema = ruleSetSchema.array()
   return apiRequest('/api/rulesets', schema)
+}
+
+export async function updateRuleSet(
+  rulesetId: string,
+  request: UpdateRuleSetRequest,
+): Promise<RuleSet> {
+  return apiRequest(`/api/rulesets/${rulesetId}`, ruleSetSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  })
 }
 
 export async function createDraftRuleSet(
