@@ -82,3 +82,15 @@ class DocumentModel(BaseModel):
     image_count: int
     styles: dict[str, dict[str, Any]]
     parse_warnings: list[ParseWarning] = Field(default_factory=list)
+
+
+class UploadedDocumentRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    filename: str
+    path: str
+    original_path: str
+    original_format: str
+    normalized_format: str
+    size_bytes: int

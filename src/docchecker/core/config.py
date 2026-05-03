@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     app_name: str = "DocChecker"
     checker_version: str = "0.1.0"
     storage_dir: Path = Field(default=Path("storage"))
+    database_path: Path = Field(default=Path("storage/docchecker.sqlite3"))
     max_document_size_bytes: int = 30 * 1024 * 1024
     max_requirement_size_bytes: int = 20 * 1024 * 1024
     libreoffice_command: str = "soffice"
@@ -30,4 +31,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     return settings

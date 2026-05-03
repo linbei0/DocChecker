@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -8,6 +10,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from docchecker.core.config import get_settings
+from docchecker.domain.document import UploadedDocumentRecord
 from docchecker.domain.enums import DraftRuleSetStatus, SourceType, TaskStatus
 from docchecker.domain.findings import CheckReport
 from docchecker.domain.requirements import RequirementDocument, RequirementDocumentModel
@@ -28,18 +31,22 @@ from docchecker.services.rule_extractor import (
     extract_rules_from_requirement_document,
     extract_rules_from_text,
 )
+from docchecker.services.state_store import SqliteStateStore
 from docchecker.services.word_document_preparer import prepare_word_document
 
-app = FastAPI(title="DocChecker API", version="0.1.0")
 settings = get_settings()
 storage = LocalFileStorage(settings.storage_dir)
+state_store = SqliteStateStore(settings.database_path)
+state_store.initialize()
 
-DOCUMENTS: dict[str, dict[str, str]] = {}
-REQUIREMENT_DOCUMENTS: dict[str, RequirementDocument] = {}
-RULESETS: dict[str, RuleSet] = {}
-DRAFT_RULESETS: dict[str, DraftRuleSet] = {}
-CHECK_TASKS: dict[str, CheckTask] = {}
-REPORTS: dict[str, CheckReport] = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    state_store.initialize()
+    yield
+
+
+app = FastAPI(title="DocChecker API", version="0.1.0", lifespan=lifespan)
 
 
 class UploadedDocumentResponse(BaseModel):
@@ -109,17 +116,24 @@ async def upload_document(file: UploadWordFile) -> UploadedDocumentResponse:
     except DocumentValidationError as exc:
         _cleanup_failed_upload(stored.path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    DOCUMENTS[stored.document_id] = {
-        "filename": stored.original_filename,
-        "path": str(prepared.normalized_path),
-        "original_path": str(prepared.original_path),
-        "original_format": prepared.original_format,
-        "normalized_format": prepared.normalized_format,
-    }
+    record = UploadedDocumentRecord(
+        id=stored.document_id,
+        filename=stored.original_filename,
+        path=str(prepared.normalized_path),
+        original_path=str(prepared.original_path),
+        original_format=prepared.original_format,
+        normalized_format=prepared.normalized_format,
+        size_bytes=stored.path.stat().st_size,
+    )
+    try:
+        state_store.save_document(record)
+    except Exception:
+        _cleanup_failed_upload(stored.path)
+        raise
     return UploadedDocumentResponse(
         document_id=stored.document_id,
         filename=stored.original_filename,
-        size_bytes=stored.path.stat().st_size,
+        size_bytes=record.size_bytes,
         original_format=prepared.original_format,
         normalized_format=prepared.normalized_format,
     )
@@ -153,29 +167,34 @@ async def upload_requirement_document(file: UploadWordFile) -> RequirementDocume
         normalized_format=prepared.normalized_format,
         created_at=_now(),
     )
-    REQUIREMENT_DOCUMENTS[requirement_document.id] = requirement_document
+    try:
+        state_store.save_requirement_document(requirement_document)
+    except Exception:
+        _cleanup_failed_upload(stored.path)
+        raise
     return requirement_document
 
 
 @app.post("/api/rulesets", response_model=RuleSet)
 def create_ruleset(ruleset: RuleSet) -> RuleSet:
-    RULESETS[ruleset.id] = ruleset
+    state_store.save_ruleset(ruleset)
     return ruleset
 
 
 @app.get("/api/rulesets", response_model=list[RuleSet])
 def list_rulesets() -> list[RuleSet]:
-    return list(RULESETS.values())
+    return state_store.list_rulesets()
 
 
 @app.post("/api/draft-rulesets", response_model=DraftRuleSet)
 def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
-    if request.document_id not in DOCUMENTS:
+    document = state_store.get_document(request.document_id)
+    if not document:
         raise HTTPException(status_code=404, detail="文档不存在。")
 
     now = _now()
     if request.source_type == SourceType.template:
-        template = RULESETS.get(request.template_ruleset_id or "")
+        template = state_store.get_ruleset(request.template_ruleset_id or "")
         if not template:
             raise HTTPException(status_code=404, detail="模板规则集不存在。")
         rules = [rule.model_copy(deep=True) for rule in template.rules]
@@ -187,7 +206,9 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
     else:
         text = request.manual_text or ""
         if request.source_type == SourceType.requirement_doc:
-            requirement_document = REQUIREMENT_DOCUMENTS.get(request.requirement_document_id or "")
+            requirement_document = state_store.get_requirement_document(
+                request.requirement_document_id or ""
+            )
             if not requirement_document:
                 raise HTTPException(status_code=404, detail="规范文档不存在。")
             text = requirement_document.extracted_text
@@ -227,13 +248,13 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         created_at=now,
         updated_at=now,
     )
-    DRAFT_RULESETS[draft.id] = draft
+    state_store.save_draft_ruleset(draft)
     return draft
 
 
 @app.get("/api/draft-rulesets/{draft_id}", response_model=DraftRuleSet)
 def get_draft_ruleset(draft_id: str) -> DraftRuleSet:
-    draft = DRAFT_RULESETS.get(draft_id)
+    draft = state_store.get_draft_ruleset(draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="候选规则集不存在。")
     return draft
@@ -258,7 +279,7 @@ def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> D
         },
         deep=True,
     )
-    DRAFT_RULESETS[draft_id] = updated
+    state_store.save_draft_ruleset(updated)
     return updated
 
 
@@ -274,23 +295,28 @@ def publish_draft_ruleset(draft_id: str) -> RuleSet:
         rules=[rule.model_copy(deep=True) for rule in draft.rules],
         created_at=_now(),
     )
-    RULESETS[ruleset.id] = ruleset
-    DRAFT_RULESETS[draft_id] = draft.model_copy(
+    published_draft = draft.model_copy(
         update={
             "status": DraftRuleSetStatus.published,
             "published_ruleset_id": ruleset.id,
             "updated_at": _now(),
         }
     )
+    state_store.save_many(
+        [
+            ("ruleset", ruleset.id, ruleset),
+            ("draft_ruleset", draft_id, published_draft),
+        ]
+    )
     return ruleset
 
 
 @app.post("/api/check-tasks", response_model=CheckTask)
 def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
-    document = DOCUMENTS.get(request.document_id)
+    document = state_store.get_document(request.document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在。")
-    ruleset = RULESETS.get(request.ruleset_id)
+    ruleset = state_store.get_ruleset(request.ruleset_id)
     if not ruleset:
         raise HTTPException(status_code=404, detail="规则集不存在。")
     task = CheckTask(
@@ -301,43 +327,47 @@ def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
         created_at=_now(),
         updated_at=_now(),
     )
-    CHECK_TASKS[task.id] = task
+    state_store.save_check_task(task)
     service = CheckService(settings, storage)
     try:
         report = service.check_document(
-            Path(document["path"]),
+            Path(document.path),
             document_id=request.document_id,
-            filename=document["filename"],
+            filename=document.filename,
             ruleset=ruleset,
         )
     except DocumentValidationError as exc:
         failed = task.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
-        CHECK_TASKS[task.id] = failed
+        state_store.save_check_task(failed)
         return failed
     except Exception as exc:
         failed = task.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
-        CHECK_TASKS[task.id] = failed
+        state_store.save_check_task(failed)
         return failed
-    REPORTS[report.id] = report
     succeeded = task.model_copy(
         update={"status": TaskStatus.succeeded, "report_id": report.id, "updated_at": _now()}
     )
-    CHECK_TASKS[task.id] = succeeded
+    state_store.save_many(
+        [
+            ("report", report.id, report),
+            ("check_task", task.id, succeeded),
+        ]
+    )
     return succeeded
 
 
 @app.get("/api/check-tasks", response_model=list[CheckTask])
 def list_check_tasks() -> list[CheckTask]:
-    return sorted(CHECK_TASKS.values(), key=lambda task: task.created_at, reverse=True)
+    return state_store.list_check_tasks()
 
 
 @app.get("/api/check-tasks/{task_id}", response_model=CheckTask)
 def get_check_task(task_id: str) -> CheckTask:
-    task = CHECK_TASKS.get(task_id)
+    task = state_store.get_check_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="检查任务不存在。")
     return task
@@ -345,7 +375,7 @@ def get_check_task(task_id: str) -> CheckTask:
 
 @app.get("/api/reports/{report_id}", response_model=CheckReport)
 def get_report(report_id: str) -> CheckReport:
-    report = REPORTS.get(report_id)
+    report = state_store.get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="报告不存在。")
     return report
