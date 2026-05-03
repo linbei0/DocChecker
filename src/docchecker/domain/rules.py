@@ -2,8 +2,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from docchecker.domain.enums import DraftRuleSetStatus, RuleCategory, Severity, SourceType
-
+from docchecker.domain.enums import (
+    DraftRuleSetStatus,
+    RuleCategory,
+    Severity,
+    SourceType,
+)
 
 RuleEvidenceType = Literal[
     "explicit_text",

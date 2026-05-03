@@ -315,7 +315,8 @@ def _document_excerpt(paragraphs: list[ParagraphNode]) -> str | None:
     snippets = [
         paragraph.text.strip()
         for paragraph in paragraphs
-        if paragraph.text.strip() and (_is_heading_paragraph(paragraph) or len(paragraph.text) <= 80)
+        if paragraph.text.strip()
+        and (_is_heading_paragraph(paragraph) or len(paragraph.text) <= 80)
     ]
     if not snippets:
         snippets = [paragraph.text.strip() for paragraph in paragraphs if paragraph.text.strip()]

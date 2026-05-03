@@ -15,6 +15,11 @@ type SourceType = 'manual' | 'requirement_doc' | 'template'
 
 const MAX_DOCUMENT_SIZE_BYTES = 30 * 1024 * 1024
 const MAX_REQUIREMENT_SIZE_BYTES = 20 * 1024 * 1024
+const WORD_FILE_ACCEPT = '.doc,.docx'
+
+export function isSupportedWordFilename(filename: string): boolean {
+  return /\.docx?$/i.test(filename)
+}
 
 const steps = [
   { id: 1, label: '上传论文', desc: '上传待检查的 Word 文档' },
@@ -70,8 +75,8 @@ export function CheckNewPage() {
 
   const handleDocumentFile = async (file: File) => {
     setError(null)
-    if (!file.name.endsWith('.docx')) {
-      setError('仅支持 .docx 格式论文文件。')
+    if (!isSupportedWordFilename(file.name)) {
+      setError('仅支持 .doc 或 .docx 格式论文文件。')
       return
     }
     if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
@@ -89,8 +94,8 @@ export function CheckNewPage() {
 
   const handleRequirementFile = async (file: File) => {
     setError(null)
-    if (!file.name.endsWith('.docx')) {
-      setError('仅支持 .docx 格式规范文档。')
+    if (!isSupportedWordFilename(file.name)) {
+      setError('仅支持 .doc 或 .docx 格式规范文档。')
       return
     }
     if (file.size > MAX_REQUIREMENT_SIZE_BYTES) {
@@ -153,7 +158,7 @@ export function CheckNewPage() {
                     isDragging={isDragging}
                     isLoading={uploadMutation.isPending}
                     title="拖拽文件到此处，或点击上传"
-                    description="仅支持 .docx 格式，文件大小不超过 30MB"
+                    description="支持 .doc 或 .docx 格式，文件大小不超过 30MB"
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
@@ -220,7 +225,7 @@ export function CheckNewPage() {
                         <label className="block rounded-xl border border-dashed border-neutral-300 p-6 text-center transition hover:border-primary-400">
                           <input
                             type="file"
-                            accept=".docx"
+                            accept={WORD_FILE_ACCEPT}
                             className="hidden"
                             onChange={(event) => {
                               const file = event.target.files?.[0]
@@ -229,7 +234,7 @@ export function CheckNewPage() {
                           />
                           <Upload className="mx-auto h-8 w-8 text-neutral-400" />
                           <p className="mt-3 text-sm font-medium text-neutral-700">
-                            上传学校/学院格式规范 .docx
+                            上传学校/学院格式规范 .doc 或 .docx
                           </p>
                           <p className="mt-1 text-xs text-neutral-400">文件大小不超过 20MB</p>
                           {uploadRequirementMutation.isPending && (
@@ -405,7 +410,7 @@ function FileDropzone({
     >
       <input
         type="file"
-        accept=".docx"
+        accept={WORD_FILE_ACCEPT}
         onChange={onChange}
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       />

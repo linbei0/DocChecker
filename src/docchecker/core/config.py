@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     storage_dir: Path = Field(default=Path("storage"))
     max_document_size_bytes: int = 30 * 1024 * 1024
     max_requirement_size_bytes: int = 20 * 1024 * 1024
+    libreoffice_command: str = "soffice"
+    libreoffice_conversion_timeout_seconds: int = 60
     rule_extractor_mode: Literal["local", "hybrid"] = "local"
     llm_api_base: str | None = None
     llm_api_key: str | None = None

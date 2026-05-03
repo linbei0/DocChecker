@@ -8,7 +8,7 @@ from docchecker.domain.findings import CheckReport
 from docchecker.domain.rules import RuleSet
 from docchecker.parsing.docx_parser import parse_docx
 from docchecker.reports.markdown import render_markdown_report
-from docchecker.services.docx_validator import validate_docx_path
+from docchecker.services.docx_validator import validate_docx_package
 from docchecker.services.file_storage import LocalFileStorage
 
 
@@ -26,7 +26,7 @@ class CheckService:
         filename: str,
         ruleset: RuleSet,
     ) -> CheckReport:
-        validate_docx_path(path, max_size_bytes=self.settings.max_document_size_bytes)
+        validate_docx_package(path)
         document = parse_docx(path, document_id=document_id, source_filename=filename)
         findings = self.engine.run(document, ruleset.rules)
         report = CheckReport(

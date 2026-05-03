@@ -861,7 +861,7 @@ def _llm_rule_candidates(
         candidates = TypeAdapter(list[ExtractedRuleCandidate]).validate_python(
             parsed.get("rule_candidates", [])
         )
-    except (KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
+    except (KeyError, TypeError, json.JSONDecodeError, ValidationError):
         return [], [
             RuleExtractionIssue(
                 reason_code="invalid_llm_response",
@@ -1022,14 +1022,12 @@ def _should_skip_default_body_paragraph_rule(
         return False
     if _has_non_body_format_context(chunk.text):
         return True
-    if (
+    return bool(
         chunk.location
         and chunk.location.startswith("comment:")
         and chunk.target_hint != "body.paragraph"
         and "正文" not in chunk.text
-    ):
-        return True
-    return False
+    )
 
 
 def _has_non_body_format_context(text: str) -> bool:
@@ -1230,7 +1228,17 @@ def _move_conflicting_rules_to_confirmation(
         if not rule_conflicts:
             normalized_rules.append(rule)
             continue
-        if all((id(rule), rule.target.scope, rule.target.selector, rule.category, field) in auto_allowed for field in conflicting_fields):
+        if all(
+            (
+                id(rule),
+                rule.target.scope,
+                rule.target.selector,
+                rule.category,
+                field,
+            )
+            in auto_allowed
+            for field in conflicting_fields
+        ):
             normalized_rules.append(rule)
             continue
         normalized_rules.append(

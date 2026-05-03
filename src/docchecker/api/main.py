@@ -20,7 +20,7 @@ from docchecker.domain.rules import (
 )
 from docchecker.domain.tasks import CheckTask
 from docchecker.services.check_service import CheckService
-from docchecker.services.docx_validator import DocumentValidationError, validate_docx_path
+from docchecker.services.docx_validator import DocumentValidationError
 from docchecker.services.file_storage import LocalFileStorage
 from docchecker.services.requirement_parser import parse_requirement_document
 from docchecker.services.rule_extractor import (
@@ -28,6 +28,7 @@ from docchecker.services.rule_extractor import (
     extract_rules_from_requirement_document,
     extract_rules_from_text,
 )
+from docchecker.services.word_document_preparer import prepare_word_document
 
 app = FastAPI(title="DocChecker API", version="0.1.0")
 settings = get_settings()
@@ -47,6 +48,8 @@ class UploadedDocumentResponse(BaseModel):
     document_id: str
     filename: str
     size_bytes: int
+    original_format: str
+    normalized_format: str
 
 
 class CreateCheckTaskRequest(BaseModel):
@@ -90,47 +93,64 @@ def health() -> dict[str, str]:
     return {"status": "ok", "time": datetime.now(UTC).isoformat()}
 
 
-UploadDocxFile = Annotated[UploadFile, File(...)]
+UploadWordFile = Annotated[UploadFile, File(...)]
 
 
 @app.post("/api/documents", response_model=UploadedDocumentResponse)
-async def upload_document(file: UploadDocxFile) -> UploadedDocumentResponse:
+async def upload_document(file: UploadWordFile) -> UploadedDocumentResponse:
     stored = await storage.save_upload(file)
     try:
-        validate_docx_path(stored.path, max_size_bytes=settings.max_document_size_bytes)
+        prepared = prepare_word_document(
+            stored.path,
+            max_size_bytes=settings.max_document_size_bytes,
+            libreoffice_command=settings.libreoffice_command,
+            conversion_timeout_seconds=settings.libreoffice_conversion_timeout_seconds,
+        )
     except DocumentValidationError as exc:
-        stored.path.unlink(missing_ok=True)
+        _cleanup_failed_upload(stored.path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     DOCUMENTS[stored.document_id] = {
         "filename": stored.original_filename,
-        "path": str(stored.path),
+        "path": str(prepared.normalized_path),
+        "original_path": str(prepared.original_path),
+        "original_format": prepared.original_format,
+        "normalized_format": prepared.normalized_format,
     }
     return UploadedDocumentResponse(
         document_id=stored.document_id,
         filename=stored.original_filename,
         size_bytes=stored.path.stat().st_size,
+        original_format=prepared.original_format,
+        normalized_format=prepared.normalized_format,
     )
 
 
 @app.post("/api/requirement-documents", response_model=RequirementDocument)
-async def upload_requirement_document(file: UploadDocxFile) -> RequirementDocument:
+async def upload_requirement_document(file: UploadWordFile) -> RequirementDocument:
     stored = await storage.save_upload(file)
     try:
-        validate_docx_path(stored.path, max_size_bytes=settings.max_requirement_size_bytes)
-        parsed_requirement = parse_requirement_document(stored.path)
+        prepared = prepare_word_document(
+            stored.path,
+            max_size_bytes=settings.max_requirement_size_bytes,
+            libreoffice_command=settings.libreoffice_command,
+            conversion_timeout_seconds=settings.libreoffice_conversion_timeout_seconds,
+        )
+        parsed_requirement = parse_requirement_document(prepared.normalized_path)
         extracted_text = "\n".join(
             f"{block.location}\t{block.text}" for block in parsed_requirement.blocks if block.text
         )
     except DocumentValidationError as exc:
-        stored.path.unlink(missing_ok=True)
+        _cleanup_failed_upload(stored.path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     requirement_document = RequirementDocument(
         id=f"req_{uuid4().hex}",
         filename=stored.original_filename,
-        path=str(stored.path),
+        path=str(prepared.normalized_path),
         size_bytes=stored.path.stat().st_size,
         extracted_text=extracted_text,
         blocks=parsed_requirement.blocks,
+        original_format=prepared.original_format,
+        normalized_format=prepared.normalized_format,
         created_at=_now(),
     )
     REQUIREMENT_DOCUMENTS[requirement_document.id] = requirement_document
@@ -337,6 +357,12 @@ def export_report(report_id: str) -> dict[str, str]:
     if not path.exists():
         raise HTTPException(status_code=404, detail="报告文件不存在。")
     return {"format": "markdown", "path": str(path), "content": path.read_text(encoding="utf-8")}
+
+
+def _cleanup_failed_upload(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    if path.suffix.lower() == ".doc":
+        path.with_suffix(".docx").unlink(missing_ok=True)
 
 
 def _now() -> str:

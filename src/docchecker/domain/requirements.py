@@ -39,4 +39,6 @@ class RequirementDocument(BaseModel):
     size_bytes: int
     extracted_text: str
     blocks: list[RequirementBlock] = Field(default_factory=list)
+    original_format: str
+    normalized_format: str
     created_at: str

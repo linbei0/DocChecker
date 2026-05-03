@@ -4,6 +4,8 @@ export const uploadedDocumentSchema = z.object({
   document_id: z.string(),
   filename: z.string(),
   size_bytes: z.number(),
+  original_format: z.string(),
+  normalized_format: z.string(),
 })
 
 export const requirementBlockSchema = z.object({
@@ -27,6 +29,8 @@ export const requirementDocumentSchema = z.object({
   size_bytes: z.number(),
   extracted_text: z.string(),
   blocks: z.array(requirementBlockSchema).optional(),
+  original_format: z.string(),
+  normalized_format: z.string(),
   created_at: z.string(),
 })
 

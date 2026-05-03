@@ -91,7 +91,8 @@ def test_parse_requirement_document_links_comments_to_anchored_paragraph(
         document_xml = package.read("word/document.xml").decode("utf-8")
         document_xml = document_xml.replace(
             "<w:t>××××××（正文段落）</w:t>",
-            '<w:commentRangeStart w:id="9"/><w:t>××××××（正文段落）</w:t><w:commentRangeEnd w:id="9"/><w:r><w:commentReference w:id="9"/></w:r>',
+            '<w:commentRangeStart w:id="9"/><w:t>××××××（正文段落）</w:t>'
+            '<w:commentRangeEnd w:id="9"/><w:r><w:commentReference w:id="9"/></w:r>',
         )
         package.writestr("word/document.xml", document_xml)
         package.writestr(

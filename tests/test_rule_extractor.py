@@ -241,18 +241,24 @@ def test_body_comment_anchor_extracts_body_font_rule(
         document_xml = package.read("word/document.xml").decode("utf-8")
         document_xml = document_xml.replace(
             "<w:t>××××××（正文段落）</w:t>",
-            '<w:commentRangeStart w:id="15"/><w:t>××××××（正文段落）</w:t><w:commentRangeEnd w:id="15"/><w:r><w:commentReference w:id="15"/></w:r>',
+            '<w:commentRangeStart w:id="15"/><w:t>××××××（正文段落）</w:t>'
+            '<w:commentRangeEnd w:id="15"/><w:r><w:commentReference w:id="15"/></w:r>',
         )
         package.writestr("word/document.xml", document_xml)
         package.writestr(
             "word/comments.xml",
-            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            (
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:comment w:id="15" w:author="user">
-    <w:p><w:r><w:t>中文 宋体、小四，英文和数字 Times New Roman、小四，两端对齐，首行缩进2字符，行距1.5倍。</w:t></w:r></w:p>
+    <w:p><w:r><w:t>"""
+                "中文 宋体、小四，英文和数字 Times New Roman、小四，"
+                "两端对齐，首行缩进2字符，行距1.5倍。"
+                """</w:t></w:r></w:p>
   </w:comment>
 </w:comments>
-""",
+"""
+            ),
         )
 
     requirement = parse_requirement_document(path)

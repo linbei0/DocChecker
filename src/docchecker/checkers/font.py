@@ -140,7 +140,9 @@ def _numbered_heading_level(text: str) -> int | None:
 def _is_toc_paragraph(document: DocumentModel, paragraph: ParagraphNode) -> bool:
     return any(
         section.role == "toc"
-        and section.start_paragraph_index <= paragraph.index <= (section.end_paragraph_index or paragraph.index)
+        and section.start_paragraph_index
+        <= paragraph.index
+        <= (section.end_paragraph_index or paragraph.index)
         for section in document.logical_sections
     )
 
@@ -148,7 +150,9 @@ def _is_toc_paragraph(document: DocumentModel, paragraph: ParagraphNode) -> bool
 def _is_body_paragraph(document: DocumentModel, paragraph: ParagraphNode) -> bool:
     in_body_section = any(
         section.role == "body"
-        and section.start_paragraph_index <= paragraph.index <= (section.end_paragraph_index or paragraph.index)
+        and section.start_paragraph_index
+        <= paragraph.index
+        <= (section.end_paragraph_index or paragraph.index)
         for section in document.logical_sections
     )
     if not in_body_section:
