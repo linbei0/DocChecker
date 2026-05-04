@@ -384,8 +384,8 @@ export function RuleConfirmPage() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {visibleItems.length === 0 ? (
+            {visibleItems.length === 0 ? (
+              <tbody>
                 <tr>
                   <td colSpan={7} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-neutral-400">
@@ -396,40 +396,40 @@ export function RuleConfirmPage() {
                     </div>
                   </td>
                 </tr>
-              ) : (
-                visibleItems.map((item) =>
-                  item.kind === 'rule' ? (
-                    <RuleRow
-                      key={item.id}
-                      rule={item.rule}
-                      expanded={expandedItemId === item.id}
-                      editing={editingRuleId === item.rule.id}
-                      expectationText={expectationText}
-                      onExpectationTextChange={setExpectationText}
-                      onToggle={() => toggleRule(item.rule.id)}
-                      onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
-                      onEdit={() => startEditing(item.rule)}
-                      onCancelEdit={() => setEditingRuleId(null)}
-                      onSaveEdit={() => saveRuleEdit(item.rule.id)}
-                      onSeverityChange={(severity) =>
-                        setRules((prev) =>
-                          prev.map((rule) =>
-                            rule.id === item.rule.id ? { ...rule, severity } : rule,
-                          ),
-                        )
-                      }
-                    />
-                  ) : (
-                    <UnsupportedRow
-                      key={item.id}
-                      requirement={item.requirement}
-                      expanded={expandedItemId === item.id}
-                      onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
-                    />
-                  ),
-                )
-              )}
-            </tbody>
+              </tbody>
+            ) : (
+              visibleItems.map((item) =>
+                item.kind === 'rule' ? (
+                  <RuleRow
+                    key={item.id}
+                    rule={item.rule}
+                    expanded={expandedItemId === item.id}
+                    editing={editingRuleId === item.rule.id}
+                    expectationText={expectationText}
+                    onExpectationTextChange={setExpectationText}
+                    onToggle={() => toggleRule(item.rule.id)}
+                    onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
+                    onEdit={() => startEditing(item.rule)}
+                    onCancelEdit={() => setEditingRuleId(null)}
+                    onSaveEdit={() => saveRuleEdit(item.rule.id)}
+                    onSeverityChange={(severity) =>
+                      setRules((prev) =>
+                        prev.map((rule) =>
+                          rule.id === item.rule.id ? { ...rule, severity } : rule,
+                        ),
+                      )
+                    }
+                  />
+                ) : (
+                  <UnsupportedRow
+                    key={item.id}
+                    requirement={item.requirement}
+                    expanded={expandedItemId === item.id}
+                    onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
+                  />
+                ),
+              )
+            )}
           </table>
         </div>
       </div>
@@ -450,19 +450,66 @@ function buildReviewItems(
   rules: FormatRule[],
   unsupportedRequirements: UnsupportedRequirement[],
 ): ReviewItem[] {
-  const ruleItems: ReviewItem[] = rules.map((rule) => ({
-    id: `rule:${rule.id}`,
-    kind: 'rule',
-    title: rule.target.selector || rule.target.scope,
-    rule,
-  }))
-  const unsupportedItems: ReviewItem[] = unsupportedRequirements.map((requirement, index) => ({
-    id: `unsupported:${requirement.location || index}:${requirement.excerpt}`,
-    kind: 'unsupported',
-    title: requirement.target_scope || requirement.location || requirement.category,
-    requirement,
-  }))
+  const ruleItems: RuleReviewItem[] = dedupeBy(
+    rules.map((rule) => ({
+      id: `rule:${rule.id}`,
+      kind: 'rule' as const,
+      title: rule.target.selector || rule.target.scope,
+      rule,
+    })),
+    (item) => item.id,
+  )
+  const ruleSourceKeys = new Set(
+    ruleItems.map((item) =>
+      reviewSourceKey(item.rule.category, item.rule.source.location, item.rule.source.excerpt),
+    ),
+  )
+  const unsupportedItems: UnsupportedReviewItem[] = dedupeBy(
+    unsupportedRequirements
+      .filter(
+        (requirement) =>
+          !ruleSourceKeys.has(
+            reviewSourceKey(requirement.category, requirement.location, requirement.excerpt),
+          ),
+      )
+      .map((requirement, index) => ({
+        id: `unsupported:${requirement.location || index}:${requirement.excerpt}`,
+        kind: 'unsupported' as const,
+        title: requirement.target_scope || requirement.location || requirement.category,
+        requirement,
+      })),
+    (item) =>
+      reviewSourceKey(
+        item.requirement.category,
+        item.requirement.location,
+        item.requirement.excerpt,
+      ),
+  )
   return [...ruleItems, ...unsupportedItems]
+}
+
+function dedupeBy<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  const result: T[] = []
+  for (const item of items) {
+    const key = keyOf(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
+}
+
+function reviewSourceKey(
+  category: string,
+  location: string | null | undefined,
+  excerpt: string,
+) {
+  return [
+    category,
+    location || '',
+    excerpt.replace(/\s+/g, ' ').trim(),
+  ].join('|')
 }
 
 function matchesFilter(item: ReviewItem, filter: ReviewFilter): boolean {
@@ -630,7 +677,7 @@ function UnsupportedRow({
   const contentRef = useRef<HTMLTableCellElement>(null)
 
   return (
-    <>
+    <tbody className="border-b border-neutral-100 last:border-b-0">
       <tr className="group transition-colors duration-150 hover:bg-neutral-50/80">
         <td className="px-4 py-3.5 sm:px-6">
           <span className="inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-1 text-[11px] font-medium text-neutral-500">
@@ -708,7 +755,7 @@ function UnsupportedRow({
           </td>
         </tr>
       )}
-    </>
+    </tbody>
   )
 }
 
@@ -743,7 +790,7 @@ function RuleRow({
     .join(', ')
 
   return (
-    <>
+    <tbody className="border-b border-neutral-100 last:border-b-0">
       <tr
         className={cn(
           'group transition-colors duration-150',
@@ -856,7 +903,7 @@ function RuleRow({
           </td>
         </tr>
       )}
-    </>
+    </tbody>
   )
 }
 

@@ -1465,6 +1465,11 @@ def _extract_unsupported_requirements(
                 )
                 break
     for issue in issues or []:
+        if issue.reason_code == "ambiguous_requirement" and _ambiguous_issue_covered_by_rule(
+            issue,
+            rules,
+        ):
+            continue
         if (
             issue.reason_code not in {"unsupported_field", "ambiguous_requirement"}
             and _issue_covered_by_rule(issue, rules)
@@ -1498,6 +1503,25 @@ def _issue_covered_by_rule(
         return False
     return any(
         rule.category == issue.category and rule.source.excerpt == issue.excerpt[:300]
+        for rule in rules
+    )
+
+
+def _ambiguous_issue_covered_by_rule(
+    issue: RuleExtractionIssue,
+    rules: list[FormatRule],
+) -> bool:
+    if issue.category is None:
+        return False
+    return any(
+        rule.category == issue.category
+        and (
+            (issue.excerpt is not None and rule.source.excerpt == issue.excerpt[:300])
+            or (
+                issue.location is not None
+                and rule.source.location == issue.location
+            )
+        )
         for rule in rules
     )
 

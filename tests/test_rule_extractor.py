@@ -170,6 +170,35 @@ def test_extract_rules_maps_abstract_requirements_to_checkable_rules(
     assert not any(item.category.value == "abstract" for item in result.unsupported_requirements)
 
 
+def test_confirmation_issue_covered_by_suggested_rule_is_not_duplicated_as_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "font",
+                    "target_scope": "body.paragraph",
+                    "selector": None,
+                    "expectation": {"fontFamilyEastAsia": "宋体"},
+                    "evidence_span": "正文一般采用宋体。",
+                    "location": "comment:27",
+                    "checkability": "needs_confirmation",
+                    "confidence": 0.72,
+                    "reason": "措辞不够确定",
+                }
+            ]
+        },
+    )
+
+    assert result.suggested_rules
+    assert not any(
+        item.capability_status == "needs_confirmation" and item.location == "comment:27"
+        for item in result.unsupported_requirements
+    )
+
+
 def test_extract_rules_does_not_treat_caption_or_abstract_notes_as_body_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
