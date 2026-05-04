@@ -4,6 +4,7 @@ import pytest
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
@@ -45,16 +46,25 @@ def test_parse_docx_builds_document_facts(tmp_path: Path) -> None:
     document = Document()
     document.sections[0].header.paragraphs[0].text = "学校论文"
     document.add_paragraph("正文内容")
+    document.add_paragraph("表1.1 基本要求")
     table = document.add_table(rows=1, cols=2)
     table.cell(0, 0).text = "项目"
     table.cell(0, 1).text = "要求"
+    document.add_paragraph("表后说明")
     document.save(path)
 
     model = parse_docx(path, document_id="doc_1", source_filename="facts.docx")
 
     assert any(fact.text == "学校论文" for fact in model.facts.headers_footers)
+    header = next(fact for fact in model.facts.headers_footers if fact.text == "学校论文")
+    assert header.paragraphs[0].text == "学校论文"
+    assert header.paragraphs[0].effective_format_sources
     assert model.facts.tables[0].row_count == 1
     assert model.facts.tables[0].cells[1].text == "要求"
+    assert model.facts.tables[0].caption_text == "表1.1 基本要求"
+    assert model.facts.tables[0].caption_position == "before"
+    assert model.facts.tables[0].preceding_paragraph_index == 1
+    assert model.facts.tables[0].following_paragraph_index == 2
     assert "word/document.xml" in model.facts.xml_parts
 
 
@@ -78,6 +88,9 @@ def test_parse_docx_resolves_style_inherited_paragraph_format(tmp_path: Path) ->
     assert paragraph.space_after_pt == 6
     assert paragraph.raw["effective_format_sources"]["font_size_pt"] == "paragraph_style:Normal"
     assert paragraph.raw["effective_format_sources"]["space_after_pt"] == "paragraph_style:Normal"
+    fact = next(item for item in model.facts.effective_formats if item.owner_id == "paragraph:0")
+    assert fact.values["font_size_pt"] == 12
+    assert fact.sources["font_size_pt"] == "paragraph_style:Normal"
 
 
 def test_property_and_ooxml_checkers_use_document_facts(tmp_path: Path) -> None:
@@ -131,6 +144,22 @@ def test_property_and_ooxml_checkers_use_document_facts(tmp_path: Path) -> None:
 
     assert any(finding.checker_id == "property" for finding in findings)
     assert not any(finding.rule_id == "ooxml_requires_body" for finding in findings)
+
+
+def test_parse_docx_reads_simple_field_facts(tmp_path: Path) -> None:
+    path = tmp_path / "field.docx"
+    document = Document()
+    paragraph = document.add_paragraph("第 ")
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    paragraph._p.append(field)
+    paragraph.add_run(" 页")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="field.docx")
+
+    assert any(fact.field_type == "PAGE" for fact in model.facts.fields)
+    assert model.facts.fields[0].part_name == "word/document.xml"
 
 
 def test_parse_docx_resolves_east_asia_font_from_style_xml(tmp_path: Path) -> None:
