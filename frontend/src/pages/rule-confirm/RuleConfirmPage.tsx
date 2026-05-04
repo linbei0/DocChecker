@@ -20,6 +20,12 @@ import {
   useUpdateDraftRuleSetMutation,
 } from '@/features/rulesets/hooks'
 import { useCreateCheckTaskMutation } from '@/features/check-tasks/hooks'
+import {
+  buildFeedbackGroups,
+  buildTraceDiagnosis,
+  buildUnsupportedBacklogPayload,
+  type FeedbackGroup,
+} from './ruleReviewDiagnostics'
 
 type ReviewFilter = 'all' | 'auto' | 'confirmation' | 'conflict' | 'llm' | 'unsupported'
 
@@ -157,12 +163,13 @@ export function RuleConfirmPage() {
 
   const exportUnsupportedBacklog = () => {
     if (!draft) return
-    const payload = {
-      draft_id: draft.id,
-      generated_at: new Date().toISOString(),
-      unsupported_requirements: draft.unsupported_requirements ?? [],
-      extraction_trace: draft.extraction_trace ?? null,
-    }
+    const payload = buildUnsupportedBacklogPayload({
+      draftId: draft.id,
+      generatedAt: new Date().toISOString(),
+      rules,
+      unsupportedRequirements: draft.unsupported_requirements ?? [],
+      extractionTrace: draft.extraction_trace,
+    })
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: 'application/json;charset=utf-8',
     })
@@ -209,6 +216,8 @@ export function RuleConfirmPage() {
   const summary = draft.extraction_summary
   const unsupportedRequirements = draft.unsupported_requirements ?? []
   const reviewItems = buildReviewItems(rules, unsupportedRequirements)
+  const feedbackGroups = buildFeedbackGroups(rules, unsupportedRequirements)
+  const traceDiagnosis = buildTraceDiagnosis(draft.extraction_trace)
   const visibleItems = reviewItems.filter((item) => matchesFilter(item, activeFilter))
   const visibleRules = visibleItems
     .filter((item): item is RuleReviewItem => item.kind === 'rule')
@@ -304,8 +313,32 @@ export function RuleConfirmPage() {
               value={`${Math.round(draft.extraction_trace.stats.auto_checkable_conversion_rate * 100)}%`}
             />
           </div>
+          {traceDiagnosis.length > 0 && (
+            <div className="mt-4 rounded-xl border border-neutral-100 bg-neutral-50/70 px-4 py-3">
+              <p className="text-xs font-semibold text-neutral-700">诊断指向</p>
+              <div className="mt-2 grid gap-2 text-xs leading-relaxed text-neutral-600 lg:grid-cols-2">
+                {traceDiagnosis.map((item) => (
+                  <div key={item} className="flex items-start gap-2">
+                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-400" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      <div className="mb-8 grid gap-3 lg:grid-cols-4">
+        {feedbackGroups.map((group) => (
+          <FeedbackGroupCard
+            key={group.id}
+            group={group}
+            active={activeFilter === group.id || (group.id === 'scope' && activeFilter === 'confirmation')}
+            onClick={() => setActiveFilter(group.id === 'scope' ? 'confirmation' : group.id)}
+          />
+        ))}
+      </div>
 
       {/* Main Workbench */}
       <div className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-sm">
@@ -601,6 +634,46 @@ function TraceMetric({ label, value }: { label: string; value: number | string }
       <p className="text-[11px] font-medium text-neutral-500">{label}</p>
       <p className="mt-1 text-lg font-semibold tabular-nums text-neutral-900">{value}</p>
     </div>
+  )
+}
+
+function FeedbackGroupCard({
+  group,
+  active,
+  onClick,
+}: {
+  group: FeedbackGroup
+  active: boolean
+  onClick: () => void
+}) {
+  const tone =
+    group.id === 'unsupported'
+      ? 'border-danger-100 bg-danger-50/40 text-danger-700'
+      : group.id === 'conflict'
+        ? 'border-warning-100 bg-warning-50/50 text-warning-700'
+        : 'border-neutral-200 bg-white text-neutral-700'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-2xl border p-4 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md',
+        tone,
+        active && 'ring-2 ring-primary-400/30',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-neutral-900">{group.label}</p>
+          <p className="mt-1 text-xs leading-relaxed text-neutral-500">{group.description}</p>
+        </div>
+        <span className="rounded-full bg-white/80 px-2.5 py-1 text-sm font-semibold tabular-nums text-neutral-900">
+          {group.count}
+        </span>
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-neutral-600">{group.nextAction}</p>
+    </button>
   )
 }
 
