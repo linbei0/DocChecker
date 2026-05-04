@@ -107,6 +107,19 @@ export const ruleExtractionTraceSchema = z.object({
   mode: z.string(),
   candidates: z.array(extractedRuleCandidateSchema).optional(),
   issues: z.array(ruleExtractionIssueSchema).optional(),
+  stats: z
+    .object({
+      local_candidate_count: z.number(),
+      llm_candidate_count: z.number(),
+      llm_rejected_count: z.number(),
+      unsupported_field_count: z.number(),
+      conflict_count: z.number(),
+      auto_checkable_candidate_count: z.number(),
+      needs_confirmation_candidate_count: z.number(),
+      unsupported_candidate_count: z.number(),
+      auto_checkable_conversion_rate: z.number(),
+    })
+    .optional(),
 })
 
 export const ruleSetSchema = z.object({

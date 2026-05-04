@@ -125,12 +125,27 @@ class RuleExtractionIssue(BaseModel):
     excerpt: str | None = None
 
 
+class RuleExtractionStats(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    local_candidate_count: int = 0
+    llm_candidate_count: int = 0
+    llm_rejected_count: int = 0
+    unsupported_field_count: int = 0
+    conflict_count: int = 0
+    auto_checkable_candidate_count: int = 0
+    needs_confirmation_candidate_count: int = 0
+    unsupported_candidate_count: int = 0
+    auto_checkable_conversion_rate: float = 0
+
+
 class RuleExtractionTrace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: str
     candidates: list[ExtractedRuleCandidate] = Field(default_factory=list)
     issues: list[RuleExtractionIssue] = Field(default_factory=list)
+    stats: RuleExtractionStats = Field(default_factory=RuleExtractionStats)
 
 
 class RuleSet(BaseModel):

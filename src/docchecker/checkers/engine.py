@@ -1,7 +1,10 @@
 from docchecker.checkers.base import Checker
 from docchecker.checkers.font import FontChecker
+from docchecker.checkers.header_footer import HeaderFooterChecker
+from docchecker.checkers.ooxml import OoxmlRuleChecker
 from docchecker.checkers.page_setup import PageSetupChecker
 from docchecker.checkers.paragraph import ParagraphChecker
+from docchecker.checkers.property import PropertyChecker
 from docchecker.checkers.semantic import (
     CaptionChecker,
     ReferenceChecker,
@@ -23,10 +26,13 @@ class CheckEngine:
             PageSetupChecker(),
             FontChecker(),
             ParagraphChecker(),
+            HeaderFooterChecker(),
             StructureChecker(),
             TocChecker(),
             CaptionChecker(),
             ReferenceChecker(),
+            PropertyChecker(),
+            OoxmlRuleChecker(),
         ]
 
     def run(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:

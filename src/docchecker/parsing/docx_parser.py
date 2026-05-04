@@ -7,12 +7,19 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 from docchecker.domain.document import (
+    DocumentFacts,
     DocumentModel,
+    FieldFact,
+    HeaderFooterFact,
     LogicalSectionNode,
+    NumberingFact,
     ParagraphNode,
     ParseWarning,
     RunSpan,
     SectionNode,
+    StyleFact,
+    TableCellFact,
+    TableFact,
 )
 
 EMU_PER_CM = 360000
@@ -285,6 +292,30 @@ def _paragraph_format_value(paragraph, field: str):
     return None
 
 
+def _paragraph_format_source(paragraph, field: str) -> str | None:
+    if getattr(paragraph.paragraph_format, field) is not None:
+        return "direct"
+    for style in _style_chain(getattr(paragraph, "style", None)):
+        if getattr(style.paragraph_format, field) is not None:
+            return f"paragraph_style:{style.name}"
+    return None
+
+
+def _font_value_source(paragraph, field: str, default_font_name: str | None) -> str | None:
+    for run in paragraph.runs:
+        if getattr(run.font, field) is not None:
+            return "direct"
+        for style in _style_chain(getattr(run, "style", None)):
+            if getattr(style.font, field) is not None:
+                return f"run_style:{style.name}"
+        for style in _style_chain(getattr(paragraph, "style", None)):
+            if getattr(style.font, field) is not None:
+                return f"paragraph_style:{style.name}"
+    if field == "name" and default_font_name:
+        return "document_default"
+    return None
+
+
 def _line_spacing(paragraph) -> float | None:
     value = _paragraph_format_value(paragraph, "line_spacing")
     return value if isinstance(value, float) else None
@@ -300,6 +331,11 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
     with ZipFile(path) as package:
         package_parts = package.namelist()
         image_count = len([name for name in package_parts if name.startswith("word/media/")])
+        xml_parts = {
+            name: package.read(name).decode("utf-8", errors="replace")
+            for name in package_parts
+            if name.startswith("word/") and name.endswith(".xml")
+        }
 
     document = Document(path)
     default_font_name = _document_default_font_name(document)
@@ -337,6 +373,16 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
             default_font_name,
             script="ascii",
         )
+        raw["effective_format_sources"] = {
+            "font_family": _font_value_source(paragraph, "name", default_font_name),
+            "font_size_pt": _font_value_source(paragraph, "size", default_font_name),
+            "bold": _font_value_source(paragraph, "bold", default_font_name),
+            "alignment": _paragraph_format_source(paragraph, "alignment"),
+            "first_line_indent_cm": _paragraph_format_source(paragraph, "first_line_indent"),
+            "line_spacing": _paragraph_format_source(paragraph, "line_spacing"),
+            "space_before_pt": _paragraph_format_source(paragraph, "space_before"),
+            "space_after_pt": _paragraph_format_source(paragraph, "space_after"),
+        }
         runs = _run_spans(paragraph, default_font_name)
         paragraphs.append(
             ParagraphNode(
@@ -380,6 +426,23 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
     if not paragraphs:
         warnings.append(ParseWarning(code="empty_document", message="文档没有可解析段落。"))
 
+    facts = DocumentFacts(
+        xml_parts=xml_parts,
+        headers_footers=_header_footer_facts(document),
+        tables=_table_facts(document, paragraphs),
+        numbering=[
+            fact
+            for index, paragraph in enumerate(document.paragraphs)
+            if (fact := _numbering_fact(paragraph, index)) is not None
+        ],
+        fields=[
+            fact
+            for index, paragraph in enumerate(document.paragraphs)
+            for fact in _field_facts(paragraph, index)
+        ],
+        styles=_style_facts(document),
+    )
+
     return DocumentModel(
         document_id=document_id,
         source_filename=source_filename,
@@ -390,8 +453,134 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
         table_count=len(document.tables),
         image_count=image_count,
         styles=styles,
+        facts=facts,
         parse_warnings=warnings,
     )
+
+
+def _header_footer_facts(document) -> list[HeaderFooterFact]:
+    facts: list[HeaderFooterFact] = []
+    for section_index, section in enumerate(document.sections):
+        for kind, part in [
+            ("header.default", section.header),
+            ("footer.default", section.footer),
+            ("header.first_page", section.first_page_header),
+            ("footer.first_page", section.first_page_footer),
+            ("header.even_page", section.even_page_header),
+            ("footer.even_page", section.even_page_footer),
+        ]:
+            paragraphs = list(part.paragraphs)
+            text = "\n".join(paragraph.text for paragraph in paragraphs if paragraph.text.strip())
+            facts.append(
+                HeaderFooterFact(
+                    section_index=section_index,
+                    kind=kind,
+                    text=text,
+                    inherited=bool(getattr(part, "is_linked_to_previous", False)),
+                    paragraph_count=len(paragraphs),
+                )
+            )
+    return facts
+
+
+def _table_facts(document, paragraphs: list[ParagraphNode]) -> list[TableFact]:
+    facts: list[TableFact] = []
+    caption_candidates = [
+        paragraph.text
+        for paragraph in paragraphs
+        if re.match(r"^\s*(表|图)\s*\d+(?:[.\-]\d+)*", paragraph.text)
+    ]
+    for table_index, table in enumerate(document.tables):
+        cells = [
+            TableCellFact(
+                row_index=row_index,
+                column_index=column_index,
+                text=cell.text,
+            )
+            for row_index, row in enumerate(table.rows)
+            for column_index, cell in enumerate(row.cells)
+        ]
+        facts.append(
+            TableFact(
+                index=table_index,
+                row_count=len(table.rows),
+                column_count=len(table.columns),
+                cells=cells,
+                caption_text=caption_candidates[table_index]
+                if table_index < len(caption_candidates)
+                else None,
+            )
+        )
+    return facts
+
+
+def _numbering_fact(paragraph, index: int) -> NumberingFact | None:
+    p_pr = getattr(paragraph._p, "pPr", None)
+    num_pr = getattr(p_pr, "numPr", None) if p_pr is not None else None
+    if num_pr is None:
+        return None
+    num_id = getattr(num_pr, "numId", None)
+    ilvl = getattr(num_pr, "ilvl", None)
+    return NumberingFact(
+        paragraph_index=index,
+        num_id=str(num_id.val) if num_id is not None else None,
+        level=str(ilvl.val) if ilvl is not None else None,
+        text=paragraph.text,
+    )
+
+
+def _field_facts(paragraph, index: int) -> list[FieldFact]:
+    facts: list[FieldFact] = []
+    for node in paragraph._p.iter(qn("w:instrText")):
+        instruction = "".join(node.itertext()).strip()
+        if not instruction:
+            continue
+        field_type = instruction.split()[0].upper()
+        facts.append(
+            FieldFact(
+                paragraph_index=index,
+                field_type=field_type,
+                instruction=instruction,
+                text=paragraph.text or None,
+            )
+        )
+    return facts
+
+
+def _style_facts(document) -> list[StyleFact]:
+    facts: list[StyleFact] = []
+    for style in document.styles:
+        if not style.name:
+            continue
+        paragraph_format = getattr(style, "paragraph_format", None)
+        font = getattr(style, "font", None)
+        formatting = {
+            "fontFamily": _font_name(font) if font is not None else None,
+            "fontFamilyEastAsia": _font_name(font, script="east_asia")
+            if font is not None
+            else None,
+            "fontSizePt": font.size.pt if font is not None and font.size is not None else None,
+            "bold": font.bold if font is not None else None,
+            "alignment": _alignment_name(paragraph_format.alignment)
+            if paragraph_format is not None
+            else None,
+            "spaceBeforePt": paragraph_format.space_before.pt
+            if paragraph_format is not None and paragraph_format.space_before is not None
+            else None,
+            "spaceAfterPt": paragraph_format.space_after.pt
+            if paragraph_format is not None and paragraph_format.space_after is not None
+            else None,
+        }
+        facts.append(
+            StyleFact(
+                name=style.name,
+                style_id=style.style_id,
+                type=str(style.type),
+                base_style=_base_style_name(style),
+                formatting={key: value for key, value in formatting.items() if value is not None},
+            )
+        )
+    return facts
 
 
 def _base_style_name(style) -> str | None:

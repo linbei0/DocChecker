@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from docchecker.checkers.capabilities import (
     supported_expectation,
+    supports_scope,
     unsupported_expectation_fields,
 )
 from docchecker.domain.enums import RuleCategory, Severity, SourceType
@@ -42,6 +43,10 @@ class RuleCompilationResult:
     rules: list[FormatRule] = field(default_factory=list)
     suggested_rules: list[FormatRule] = field(default_factory=list)
     issues: list[RuleExtractionIssue] = field(default_factory=list)
+    unsupported_field_count: int = 0
+    auto_checkable_candidate_count: int = 0
+    needs_confirmation_candidate_count: int = 0
+    unsupported_candidate_count: int = 0
 
 
 def compile_rule_candidates(
@@ -52,6 +57,7 @@ def compile_rule_candidates(
     result = RuleCompilationResult()
     for candidate in candidates:
         if candidate.checkability == "unsupported":
+            result.unsupported_candidate_count += 1
             result.issues.append(
                 RuleExtractionIssue(
                     location=candidate.location,
@@ -59,6 +65,22 @@ def compile_rule_candidates(
                     reason_code="missing_checker",
                     message=candidate.reason
                     or "规则候选需要人工确认或当前系统暂不支持自动校验。",
+                    excerpt=candidate.evidence_span[:300],
+                )
+            )
+            continue
+
+        if not supports_scope(candidate.category, scope=candidate.target_scope):
+            result.unsupported_candidate_count += 1
+            result.issues.append(
+                RuleExtractionIssue(
+                    location=candidate.location,
+                    category=candidate.category,
+                    reason_code="unsupported_field",
+                    message=(
+                        "规则候选目标范围不在当前检查能力矩阵内："
+                        f"{candidate.target_scope}"
+                    ),
                     excerpt=candidate.evidence_span[:300],
                 )
             )
@@ -79,6 +101,7 @@ def compile_rule_candidates(
             normalized_expectation,
         )
         if unsupported_fields:
+            result.unsupported_field_count += len(unsupported_fields)
             result.issues.append(
                 RuleExtractionIssue(
                     location=candidate.location,
@@ -116,8 +139,10 @@ def compile_rule_candidates(
             candidate.checkability == "checkable"
             and candidate.confidence >= AUTO_CHECK_MIN_CONFIDENCE
         ):
+            result.auto_checkable_candidate_count += 1
             result.rules.append(rule)
         elif candidate.confidence >= NEEDS_CONFIRMATION_MIN_CONFIDENCE:
+            result.needs_confirmation_candidate_count += 1
             result.suggested_rules.append(
                 rule.model_copy(
                     update={
@@ -145,6 +170,7 @@ def _candidate_rule_id(candidate: ExtractedRuleCandidate) -> str:
         RuleCategory.toc: "toc_basic_shape",
         RuleCategory.caption: "caption_basic_pattern",
         RuleCategory.reference: "reference_basic_entries",
+        RuleCategory.header_footer: "header_footer_basic",
     }.get(candidate.category, f"{candidate.category.value}_candidate")
 
 

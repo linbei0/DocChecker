@@ -69,6 +69,73 @@ class ParagraphNode(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class HeaderFooterFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section_index: int
+    kind: str
+    text: str
+    inherited: bool = False
+    paragraph_count: int = 0
+
+
+class TableCellFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_index: int
+    column_index: int
+    text: str
+
+
+class TableFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    row_count: int
+    column_count: int
+    cells: list[TableCellFact] = Field(default_factory=list)
+    caption_text: str | None = None
+
+
+class NumberingFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraph_index: int
+    num_id: str | None = None
+    level: str | None = None
+    text: str
+
+
+class FieldFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraph_index: int | None = None
+    field_type: str
+    instruction: str
+    text: str | None = None
+
+
+class StyleFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    style_id: str | None = None
+    type: str | None = None
+    base_style: str | None = None
+    formatting: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentFacts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    xml_parts: dict[str, str] = Field(default_factory=dict)
+    headers_footers: list[HeaderFooterFact] = Field(default_factory=list)
+    tables: list[TableFact] = Field(default_factory=list)
+    numbering: list[NumberingFact] = Field(default_factory=list)
+    fields: list[FieldFact] = Field(default_factory=list)
+    styles: list[StyleFact] = Field(default_factory=list)
+
+
 class DocumentModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +148,7 @@ class DocumentModel(BaseModel):
     table_count: int
     image_count: int
     styles: dict[str, dict[str, Any]]
+    facts: DocumentFacts = Field(default_factory=DocumentFacts)
     parse_warnings: list[ParseWarning] = Field(default_factory=list)
 
 

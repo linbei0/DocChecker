@@ -40,6 +40,24 @@ def test_parse_docx_reads_sections_and_paragraphs(tmp_path: Path) -> None:
     assert model.paragraphs[0].font_size_pt == 12
 
 
+def test_parse_docx_builds_document_facts(tmp_path: Path) -> None:
+    path = tmp_path / "facts.docx"
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "学校论文"
+    document.add_paragraph("正文内容")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "项目"
+    table.cell(0, 1).text = "要求"
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="facts.docx")
+
+    assert any(fact.text == "学校论文" for fact in model.facts.headers_footers)
+    assert model.facts.tables[0].row_count == 1
+    assert model.facts.tables[0].cells[1].text == "要求"
+    assert "word/document.xml" in model.facts.xml_parts
+
+
 def test_parse_docx_resolves_style_inherited_paragraph_format(tmp_path: Path) -> None:
     path = tmp_path / "styled.docx"
     document = Document()
@@ -58,6 +76,61 @@ def test_parse_docx_resolves_style_inherited_paragraph_format(tmp_path: Path) ->
     assert paragraph.font_size_pt == 12
     assert paragraph.alignment == "left"
     assert paragraph.space_after_pt == 6
+    assert paragraph.raw["effective_format_sources"]["font_size_pt"] == "paragraph_style:Normal"
+    assert paragraph.raw["effective_format_sources"]["space_after_pt"] == "paragraph_style:Normal"
+
+
+def test_property_and_ooxml_checkers_use_document_facts(tmp_path: Path) -> None:
+    path = tmp_path / "property.docx"
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "论文"
+    document.add_paragraph("正文内容")
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="property.docx")
+    rules = [
+        FormatRule(
+            id="fact_header_contains_school",
+            category=RuleCategory.header_footer,
+            target=RuleTarget(scope="document.header_footer"),
+            expectation={
+                "$facts": [
+                    {
+                        "path": "facts.headers_footers.text",
+                        "operator": "contains",
+                        "value": "学校",
+                    }
+                ]
+            },
+            severity=Severity.minor,
+            source=RuleSource(
+                type=SourceType.manual,
+                excerpt="页眉应包含学校。",
+            ),
+        ),
+        FormatRule(
+            id="ooxml_requires_body",
+            category=RuleCategory.structure,
+            target=RuleTarget(scope="document.structure"),
+            expectation={
+                "$xpath": [
+                    {
+                        "part": "word/document.xml",
+                        "expression": "boolean(/w:document/w:body)",
+                    }
+                ]
+            },
+            severity=Severity.major,
+            source=RuleSource(
+                type=SourceType.manual,
+                excerpt="文档必须包含 body。",
+            ),
+        ),
+    ]
+
+    findings = CheckEngine().run(model, rules)
+
+    assert any(finding.checker_id == "property" for finding in findings)
+    assert not any(finding.rule_id == "ooxml_requires_body" for finding in findings)
 
 
 def test_parse_docx_resolves_east_asia_font_from_style_xml(tmp_path: Path) -> None:

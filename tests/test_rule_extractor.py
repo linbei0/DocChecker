@@ -6,6 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
+from docchecker.checkers.capabilities import CHECKER_CAPABILITIES, capability_manifest
 from docchecker.core.config import get_settings
 from docchecker.domain.enums import SourceType
 from docchecker.services.requirement_parser import parse_requirement_document
@@ -387,6 +388,23 @@ def test_hybrid_mode_accepts_schema_compliant_llm_candidates(
     assert "structure_required_sections" in {rule.id for rule in result.rules}
     assert result.extraction_trace is not None
     assert result.extraction_trace.issues == []
+    assert result.extraction_trace.stats.llm_candidate_count == 1
+    assert result.extraction_trace.stats.auto_checkable_candidate_count == 1
+    assert result.extraction_trace.stats.auto_checkable_conversion_rate == 1
+
+
+def test_capability_manifest_matches_checker_capabilities() -> None:
+    manifest = capability_manifest()
+    categories = {item["category"] for item in manifest["categories"]}
+
+    assert categories == {capability.category.value for capability in CHECKER_CAPABILITIES}
+    for item in manifest["categories"]:
+        assert item["fields"]
+        assert set(item["fields"]) <= next(
+            capability.fields
+            for capability in CHECKER_CAPABILITIES
+            if capability.category.value == item["category"]
+        )
 
 
 def test_hybrid_mode_rejects_invalid_llm_candidate_schema(
@@ -458,6 +476,52 @@ def test_hybrid_mode_drops_unsupported_llm_expectation_fields(
     )
     assert any(
         item.reason_code == "unsupported_field"
+        for item in result.unsupported_requirements
+    )
+    assert result.extraction_trace.stats.unsupported_field_count == 1
+
+
+def test_hybrid_mode_unsupported_candidate_stays_out_of_suggested_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, _ = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "header_footer",
+                    "target_scope": "document.header_footer",
+                    "selector": "页眉",
+                    "expectation": {},
+                    "evidence_span": "页眉应包含校徽图片。",
+                    "location": "paragraph:2",
+                    "checkability": "unsupported",
+                    "confidence": 0.9,
+                    "reason": "图片校徽暂不支持自动检查。",
+                }
+            ]
+        },
+    )
+
+    assert result.suggested_rules == []
+    assert any(item.capability_status == "unsupported" for item in result.unsupported_requirements)
+    assert result.extraction_trace.stats.unsupported_candidate_count == 1
+
+
+def test_header_footer_requirement_becomes_auto_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    try:
+        result = extract_rules_from_text(
+            "页脚应包含页码。",
+            source_type=SourceType.requirement_doc,
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert any(rule.category.value == "header_footer" for rule in result.rules)
+    assert not any(
+        item.category.value == "header_footer"
         for item in result.unsupported_requirements
     )
 

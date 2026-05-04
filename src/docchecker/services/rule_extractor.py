@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from pydantic import TypeAdapter, ValidationError
 
+from docchecker.checkers.capabilities import capability_manifest
 from docchecker.core.config import get_settings
 from docchecker.domain.enums import RuleCategory, Severity, SourceType
 from docchecker.domain.requirements import RequirementBlock, RequirementDocumentModel
@@ -14,6 +15,7 @@ from docchecker.domain.rules import (
     ExtractionSummary,
     FormatRule,
     RuleExtractionIssue,
+    RuleExtractionStats,
     RuleExtractionTrace,
     RuleSource,
     RuleTarget,
@@ -136,12 +138,19 @@ def _extract_rules_from_chunks(
     blocks: list[RequirementBlock] | None = None,
 ) -> RuleExtractionResult:
     settings = get_settings()
-    candidates = _local_rule_candidates(chunks)
+    local_candidates = _local_rule_candidates(chunks)
+    candidates = list(local_candidates)
     issues: list[RuleExtractionIssue] = []
+    llm_candidate_count = 0
+    llm_rejected_count = 0
     if settings.rule_extractor_mode == "hybrid":
-        llm_candidates, llm_issues = _llm_rule_candidates(blocks or _blocks_from_chunks(chunks))
+        llm_candidates, llm_issues, llm_stats = _llm_rule_candidates(
+            blocks or _blocks_from_chunks(chunks)
+        )
         candidates.extend(llm_candidates)
         issues.extend(llm_issues)
+        llm_candidate_count = llm_stats.llm_candidate_count
+        llm_rejected_count = llm_stats.llm_rejected_count
 
     extracted_rules: list[FormatRule] = []
     extracted_rules.extend(_extract_body_font_rules(chunks, source_type))
@@ -175,10 +184,28 @@ def _extract_rules_from_chunks(
         deduped_suggested_rules,
         unsupported,
     )
+    conflict_count = len([issue for issue in conflict_issues if "冲突" in issue.message])
+    stats = RuleExtractionStats(
+        local_candidate_count=len(local_candidates),
+        llm_candidate_count=llm_candidate_count,
+        llm_rejected_count=llm_rejected_count,
+        unsupported_field_count=compilation.unsupported_field_count,
+        conflict_count=conflict_count,
+        auto_checkable_candidate_count=compilation.auto_checkable_candidate_count,
+        needs_confirmation_candidate_count=compilation.needs_confirmation_candidate_count,
+        unsupported_candidate_count=compilation.unsupported_candidate_count,
+        auto_checkable_conversion_rate=round(
+            len(deduped_rules) / (len(deduped_rules) + len(deduped_suggested_rules)),
+            3,
+        )
+        if (len(deduped_rules) + len(deduped_suggested_rules))
+        else 0,
+    )
     trace = RuleExtractionTrace(
         mode=settings.rule_extractor_mode,
         candidates=candidates,
         issues=issues,
+        stats=stats,
     )
     return RuleExtractionResult(
         rules=deduped_rules,
@@ -690,6 +717,7 @@ def _local_rule_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRule
     candidates.extend(_toc_candidates(chunks))
     candidates.extend(_caption_candidates(chunks))
     candidates.extend(_reference_candidates(chunks))
+    candidates.extend(_header_footer_candidates(chunks))
     return candidates
 
 
@@ -788,9 +816,37 @@ def _reference_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleC
     return []
 
 
+def _header_footer_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandidate]:
+    candidates: list[ExtractedRuleCandidate] = []
+    for chunk in chunks:
+        if "页眉" not in chunk.text and "页脚" not in chunk.text and "页码" not in chunk.text:
+            continue
+        expectation: dict[str, object] = {}
+        if "页码" in chunk.text:
+            expectation["requiresPageNumber"] = True
+        text_match = re.search(r"页眉(?:内容)?[为是：:]\s*([^，。,；;\n]+)", chunk.text)
+        if text_match:
+            expectation["textContains"] = text_match.group(1).strip()
+        if not expectation:
+            continue
+        candidates.append(
+            ExtractedRuleCandidate(
+                category=RuleCategory.header_footer,
+                target_scope="document.header_footer",
+                selector="页眉页脚",
+                expectation=expectation,
+                evidence_span=chunk.text,
+                location=chunk.location,
+                checkability="checkable",
+                confidence=0.82,
+            )
+        )
+    return candidates
+
+
 def _llm_rule_candidates(
     blocks: list[RequirementBlock],
-) -> tuple[list[ExtractedRuleCandidate], list[RuleExtractionIssue]]:
+) -> tuple[list[ExtractedRuleCandidate], list[RuleExtractionIssue], RuleExtractionStats]:
     settings = get_settings()
     if not settings.llm_api_base or not settings.llm_api_key or not settings.llm_model:
         raise RuleExtractionConfigurationError(
@@ -814,9 +870,14 @@ def _llm_rule_candidates(
                     "禁止使用 specific、vague 等其他值。"
                     "expectation 必须是 JSON object，不能是字符串；无法结构化时返回空对象。"
                     "evidence_span 必须逐字摘自用户提供的规范块，不得编造来源。"
+                    "必须严格遵守随后用户消息中的 capability_manifest："
+                    "只有 category、target_scope 和 expectation 字段都被 manifest 支持时，"
+                    "才能返回 checkability=checkable；字段或范围不支持时必须返回 "
+                    "checkability=unsupported 且 expectation={}，"
+                    "不要把不支持项伪装为 needs_confirmation。"
                     "示例：{\"rule_candidates\":[{\"category\":\"structure\","
-                    "\"target_scope\":\"abstract\",\"selector\":\"中文摘要\","
-                    "\"expectation\":{\"approxWordCount\":300},"
+                    "\"target_scope\":\"document.structure\",\"selector\":\"论文结构\","
+                    "\"expectation\":{\"requiredSections\":[\"中文摘要\",\"正文\"]},"
                     "\"evidence_span\":\"中文摘要要求300字左右。\","
                     "\"location\":\"paragraph:42\","
                     "\"checkability\":\"needs_confirmation\","
@@ -827,7 +888,10 @@ def _llm_rule_candidates(
             {
                 "role": "user",
                 "content": json.dumps(
-                    [block.model_dump() for block in blocks[:80]],
+                    {
+                        "capability_manifest": capability_manifest(),
+                        "requirement_blocks": [block.model_dump() for block in blocks[:80]],
+                    },
                     ensure_ascii=False,
                 ),
             },
@@ -853,7 +917,7 @@ def _llm_rule_candidates(
                 reason_code="invalid_llm_response",
                 message=f"LLM 规则抽取调用失败：{exc}",
             )
-        ]
+        ], RuleExtractionStats(llm_rejected_count=1)
 
     content = response_payload["choices"][0]["message"]["content"]
     try:
@@ -871,7 +935,7 @@ def _llm_rule_candidates(
                 ),
                 excerpt=str(content)[:300],
             )
-        ]
+        ], RuleExtractionStats(llm_rejected_count=1)
     issues = [
         RuleExtractionIssue(
             location=candidate.location,
@@ -884,7 +948,10 @@ def _llm_rule_candidates(
         if not candidate.evidence_span.strip()
     ]
     valid_candidates = [candidate for candidate in candidates if candidate.evidence_span.strip()]
-    return valid_candidates, issues
+    return valid_candidates, issues, RuleExtractionStats(
+        llm_candidate_count=len(valid_candidates),
+        llm_rejected_count=len(candidates) - len(valid_candidates),
+    )
 
 
 def _blocks_from_chunks(chunks: list[RequirementChunk]) -> list[RequirementBlock]:
@@ -1155,7 +1222,9 @@ def _split_rules_by_confirmation(
             rule.model_copy(
                 update={
                     "enabled": False,
-                    "capability_status": "needs_confirmation",
+                    "capability_status": "conflict"
+                    if rule.capability_status == "conflict"
+                    else "needs_confirmation",
                     "confirmation_required": True,
                 }
             )
@@ -1245,7 +1314,7 @@ def _move_conflicting_rules_to_confirmation(
             rule.model_copy(
                 update={
                     "enabled": False,
-                    "capability_status": "needs_confirmation",
+                    "capability_status": "conflict",
                     "confirmation_required": True,
                 }
             )
@@ -1371,7 +1440,11 @@ def _issue_covered_by_rule(
 
 
 def _has_checkable_page_header_footer(chunk: RequirementChunk) -> bool:
-    return bool(re.search(r"(页眉|页脚)\s*[0-9]+(?:\.[0-9]+)?\s*cm", chunk.text, re.I))
+    return bool(
+        re.search(r"(页眉|页脚)\s*[0-9]+(?:\.[0-9]+)?\s*cm", chunk.text, re.I)
+        or "页码" in chunk.text
+        or re.search(r"页眉(?:内容)?[为是：:]\s*[^，。,；;\n]+", chunk.text)
+    )
 
 
 def _build_warnings(

@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CheckCircle,
   ChevronDown,
+  Download,
   Edit2,
   XCircle,
 } from 'lucide-react'
@@ -20,7 +21,7 @@ import {
 } from '@/features/rulesets/hooks'
 import { useCreateCheckTaskMutation } from '@/features/check-tasks/hooks'
 
-type ReviewFilter = 'all' | 'auto' | 'confirmation' | 'unsupported'
+type ReviewFilter = 'all' | 'auto' | 'confirmation' | 'conflict' | 'llm' | 'unsupported'
 
 type RuleReviewItem = {
   id: string
@@ -67,11 +68,15 @@ export function RuleConfirmPage() {
           ...rule,
           enabled: nextEnabled,
           capability_status:
-            nextEnabled && rule.capability_status === 'needs_confirmation'
+            nextEnabled &&
+              (rule.capability_status === 'needs_confirmation' ||
+                rule.capability_status === 'conflict')
               ? 'auto_checkable'
               : rule.capability_status,
           confirmation_required:
-            nextEnabled && rule.capability_status === 'needs_confirmation'
+            nextEnabled &&
+              (rule.capability_status === 'needs_confirmation' ||
+                rule.capability_status === 'conflict')
               ? false
               : rule.confirmation_required,
         }
@@ -90,11 +95,15 @@ export function RuleConfirmPage() {
             ...rule,
             enabled,
             capability_status:
-              enabled && rule.capability_status === 'needs_confirmation'
+              enabled &&
+                (rule.capability_status === 'needs_confirmation' ||
+                  rule.capability_status === 'conflict')
                 ? 'auto_checkable'
                 : rule.capability_status,
             confirmation_required:
-              enabled && rule.capability_status === 'needs_confirmation'
+              enabled &&
+                (rule.capability_status === 'needs_confirmation' ||
+                  rule.capability_status === 'conflict')
                 ? false
                 : rule.confirmation_required,
           }
@@ -126,9 +135,9 @@ export function RuleConfirmPage() {
     if (!draft) return
     try {
       setError(null)
-      const autoRules = rules.filter((rule) => rule.capability_status !== 'needs_confirmation')
+      const autoRules = rules.filter((rule) => rule.capability_status === 'auto_checkable')
       const suggestedRules = rules.filter(
-        (rule) => rule.capability_status === 'needs_confirmation',
+        (rule) => rule.capability_status !== 'auto_checkable',
       )
       await updateDraftMutation.mutateAsync({
         rules: autoRules,
@@ -144,6 +153,25 @@ export function RuleConfirmPage() {
     } catch (err) {
       setError('确认规则失败：' + (err instanceof Error ? err.message : '未知错误'))
     }
+  }
+
+  const exportUnsupportedBacklog = () => {
+    if (!draft) return
+    const payload = {
+      draft_id: draft.id,
+      generated_at: new Date().toISOString(),
+      unsupported_requirements: draft.unsupported_requirements ?? [],
+      extraction_trace: draft.extraction_trace ?? null,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `docchecker-unsupported-${draft.id}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   if (isLoading) {
@@ -244,6 +272,38 @@ export function RuleConfirmPage() {
             icon={<AlertCircle className="h-4 w-4 text-warning-500" />}
           />
           <SummaryMetric label="当前不可校验" value={summary.unsupported_requirements} tone="danger" icon={<XCircle className="h-4 w-4 text-danger-500" />} />
+        </div>
+      )}
+
+      {draft.extraction_trace?.stats && (
+        <div className="mb-8 rounded-2xl border border-neutral-200/80 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-neutral-900">抽取诊断</h2>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-500">
+                这里区分 LLM 不确定、规则冲突和系统暂不支持，便于判断下一步该调 prompt 还是补检查器。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={exportUnsupportedBacklog}
+              disabled={unsupportedRequirements.length === 0}
+            >
+              <Download className="mr-1.5 h-4 w-4" />
+              导出能力缺口
+            </Button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <TraceMetric label="本地候选" value={draft.extraction_trace.stats.local_candidate_count} />
+            <TraceMetric label="LLM 候选" value={draft.extraction_trace.stats.llm_candidate_count} />
+            <TraceMetric label="LLM 拒绝" value={draft.extraction_trace.stats.llm_rejected_count} />
+            <TraceMetric label="字段不支持" value={draft.extraction_trace.stats.unsupported_field_count} />
+            <TraceMetric
+              label="自动转化率"
+              value={`${Math.round(draft.extraction_trace.stats.auto_checkable_conversion_rate * 100)}%`}
+            />
+          </div>
         </div>
       )}
 
@@ -380,8 +440,10 @@ export function RuleConfirmPage() {
 const FILTER_OPTIONS: Array<{ id: ReviewFilter; label: string }> = [
   { id: 'all', label: '全部' },
   { id: 'auto', label: '可自动校验' },
-  { id: 'confirmation', label: '建议人工确认' },
-  { id: 'unsupported', label: '当前不可校验' },
+  { id: 'confirmation', label: '字段支持但需确认' },
+  { id: 'conflict', label: '规则冲突' },
+  { id: 'llm', label: 'LLM 不确定' },
+  { id: 'unsupported', label: '系统暂不支持' },
 ]
 
 function buildReviewItems(
@@ -405,9 +467,29 @@ function buildReviewItems(
 
 function matchesFilter(item: ReviewItem, filter: ReviewFilter): boolean {
   if (filter === 'all') return true
-  if (item.kind === 'unsupported') return filter === 'unsupported'
-  if (filter === 'auto') return item.rule.capability_status !== 'needs_confirmation'
-  if (filter === 'confirmation') return item.rule.capability_status === 'needs_confirmation'
+  if (item.kind === 'unsupported') {
+    if (filter === 'conflict') return item.requirement.capability_status === 'conflict'
+    if (filter === 'llm') {
+      return ['invalid_llm_response', 'llm_not_configured'].includes(
+        item.requirement.reason_code || '',
+      )
+    }
+    return filter === 'unsupported' && item.requirement.capability_status === 'unsupported'
+  }
+  if (filter === 'auto') return item.rule.capability_status === 'auto_checkable'
+  if (filter === 'confirmation') {
+    return (
+      item.rule.capability_status === 'needs_confirmation' &&
+      item.rule.source.evidence_type !== 'llm_candidate'
+    )
+  }
+  if (filter === 'conflict') return item.rule.capability_status === 'conflict'
+  if (filter === 'llm') {
+    return (
+      item.rule.capability_status === 'needs_confirmation' &&
+      item.rule.source.evidence_type === 'llm_candidate'
+    )
+  }
   return false
 }
 
@@ -462,6 +544,15 @@ function SummaryMetric({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function TraceMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-xl border border-neutral-100 bg-neutral-50/70 px-3.5 py-3">
+      <p className="text-[11px] font-medium text-neutral-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-neutral-900">{value}</p>
     </div>
   )
 }
