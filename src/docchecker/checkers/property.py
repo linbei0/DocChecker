@@ -2,6 +2,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from docchecker.checkers.rule_dsl import fact_assertions
 from docchecker.domain.document import DocumentModel
 from docchecker.domain.enums import RuleCategory
 from docchecker.domain.findings import CheckFinding, FindingLocation
@@ -21,12 +22,8 @@ class PropertyChecker:
                 or rule.confirmation_required
             ):
                 continue
-            assertions = rule.expectation.get("$facts")
-            if not isinstance(assertions, list):
-                continue
+            assertions = fact_assertions(rule.expectation)
             for index, assertion in enumerate(assertions):
-                if not isinstance(assertion, dict):
-                    continue
                 if not _assertion_passes(document, assertion):
                     findings.append(_finding(rule, assertion, index, document))
         return findings

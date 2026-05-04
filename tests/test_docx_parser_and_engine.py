@@ -146,6 +146,56 @@ def test_property_and_ooxml_checkers_use_document_facts(tmp_path: Path) -> None:
     assert not any(finding.rule_id == "ooxml_requires_body" for finding in findings)
 
 
+def test_unified_rule_dsl_routes_to_property_and_ooxml_backends(tmp_path: Path) -> None:
+    path = tmp_path / "dsl.docx"
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "论文"
+    document.add_paragraph("正文内容")
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="dsl.docx")
+    rules = [
+        FormatRule(
+            id="dsl_header_contains_school",
+            category=RuleCategory.header_footer,
+            target=RuleTarget(scope="document.header_footer"),
+            expectation={
+                "$dsl": [
+                    {
+                        "backend": "facts",
+                        "path": "facts.headers_footers.text",
+                        "operator": "contains",
+                        "value": "学校",
+                    }
+                ]
+            },
+            severity=Severity.minor,
+            source=RuleSource(type=SourceType.manual, excerpt="页眉应包含学校。"),
+        ),
+        FormatRule(
+            id="dsl_ooxml_requires_body",
+            category=RuleCategory.structure,
+            target=RuleTarget(scope="document.structure"),
+            expectation={
+                "$dsl": [
+                    {
+                        "backend": "ooxml",
+                        "operator": "xpath",
+                        "part": "word/document.xml",
+                        "expression": "boolean(/w:document/w:body)",
+                    }
+                ]
+            },
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="文档必须包含 body。"),
+        ),
+    ]
+
+    findings = CheckEngine().run(model, rules)
+
+    assert any(finding.rule_id == "dsl_header_contains_school" for finding in findings)
+    assert not any(finding.rule_id == "dsl_ooxml_requires_body" for finding in findings)
+
+
 def test_parse_docx_reads_simple_field_facts(tmp_path: Path) -> None:
     path = tmp_path / "field.docx"
     document = Document()

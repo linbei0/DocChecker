@@ -481,6 +481,43 @@ def test_hybrid_mode_drops_unsupported_llm_expectation_fields(
     assert result.extraction_trace.stats.unsupported_field_count == 1
 
 
+def test_hybrid_mode_accepts_rule_dsl_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result, request_payload = _extract_with_mocked_llm(
+        monkeypatch,
+        {
+            "rule_candidates": [
+                {
+                    "category": "header_footer",
+                    "target_scope": "document.header_footer",
+                    "selector": "页眉",
+                    "expectation": {
+                        "$dsl": [
+                            {
+                                "backend": "facts",
+                                "path": "facts.headers_footers.text",
+                                "operator": "contains",
+                                "value": "学校",
+                            }
+                        ]
+                    },
+                    "evidence_span": "页眉应包含学校名称。",
+                    "location": "paragraph:3",
+                    "checkability": "checkable",
+                    "confidence": 0.9,
+                }
+            ]
+        },
+    )
+
+    prompt_payload = json.loads(request_payload["messages"][1]["content"])
+    assert prompt_payload["capability_manifest"]["rule_dsl"]["key"] == "$dsl"
+    rule = next(rule for rule in result.rules if rule.id == "header_footer_basic")
+    assert "$dsl" in rule.expectation
+    assert result.unsupported_requirements == []
+
+
 def test_hybrid_mode_unsupported_candidate_stays_out_of_suggested_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -169,6 +169,26 @@ def capability_manifest() -> dict[str, Any]:
             "无法完全映射到 category、scope_prefixes、fields 的要求必须返回 "
             "checkability=unsupported，expectation 使用空对象，不允许自造字段。"
         ),
+        "rule_dsl": {
+            "key": "$dsl",
+            "facts_backend": {
+                "backend": "facts",
+                "operators": ["equals", "matches", "contains", "exists", "range", "sequence"],
+                "required": ["backend", "path", "operator"],
+                "example": {
+                    "backend": "facts",
+                    "path": "facts.headers_footers.text",
+                    "operator": "contains",
+                    "value": "学校",
+                },
+            },
+            "ooxml_backend": {
+                "backend": "ooxml",
+                "operators": ["xpath", "schematron"],
+                "xpath_required": ["backend", "operator", "part", "expression"],
+                "schematron_required": ["backend", "operator", "part", "schema"],
+            },
+        },
     }
 
 

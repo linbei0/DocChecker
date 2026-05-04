@@ -6,6 +6,11 @@ from docchecker.checkers.capabilities import (
     supports_scope,
     unsupported_expectation_fields,
 )
+from docchecker.checkers.rule_dsl import (
+    execution_expectation,
+    has_execution_assertions,
+    non_execution_expectation,
+)
 from docchecker.domain.enums import RuleCategory, Severity, SourceType
 from docchecker.domain.rules import (
     ExtractedRuleCandidate,
@@ -70,7 +75,16 @@ def compile_rule_candidates(
             )
             continue
 
-        if not supports_scope(candidate.category, scope=candidate.target_scope):
+        normalized_expectation = _normalize_expectation(
+            candidate.category,
+            candidate.expectation,
+        )
+        uses_execution_backend = has_execution_assertions(normalized_expectation)
+
+        if not uses_execution_backend and not supports_scope(
+            candidate.category,
+            scope=candidate.target_scope,
+        ):
             result.unsupported_candidate_count += 1
             result.issues.append(
                 RuleExtractionIssue(
@@ -86,20 +100,19 @@ def compile_rule_candidates(
             )
             continue
 
-        normalized_expectation = _normalize_expectation(
-            candidate.category,
-            candidate.expectation,
-        )
+        regular_expectation = non_execution_expectation(normalized_expectation)
         expectation = supported_expectation(
             candidate.category,
             candidate.target_scope,
-            normalized_expectation,
+            regular_expectation,
         )
         unsupported_fields = unsupported_expectation_fields(
             candidate.category,
             candidate.target_scope,
-            normalized_expectation,
+            regular_expectation,
         )
+        if uses_execution_backend:
+            expectation.update(execution_expectation(normalized_expectation))
         if unsupported_fields:
             result.unsupported_field_count += len(unsupported_fields)
             result.issues.append(

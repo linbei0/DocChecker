@@ -3,6 +3,7 @@ from typing import Any
 from lxml import etree
 from lxml.isoschematron import Schematron
 
+from docchecker.checkers.rule_dsl import schematron_assertions, xpath_assertions
 from docchecker.domain.document import DocumentModel
 from docchecker.domain.enums import RuleCategory, Severity
 from docchecker.domain.findings import CheckFinding, FindingLocation
@@ -33,13 +34,8 @@ class OoxmlRuleChecker:
 
 
 def _xpath_findings(document: DocumentModel, rule: FormatRule) -> list[CheckFinding]:
-    assertions = rule.expectation.get("$xpath")
-    if not isinstance(assertions, list):
-        return []
     findings: list[CheckFinding] = []
-    for index, assertion in enumerate(assertions):
-        if not isinstance(assertion, dict):
-            continue
+    for index, assertion in enumerate(xpath_assertions(rule.expectation)):
         part_name = assertion.get("part")
         expression = assertion.get("expression")
         if not isinstance(part_name, str) or not isinstance(expression, str):
@@ -58,13 +54,8 @@ def _xpath_findings(document: DocumentModel, rule: FormatRule) -> list[CheckFind
 
 
 def _schematron_findings(document: DocumentModel, rule: FormatRule) -> list[CheckFinding]:
-    assertions = rule.expectation.get("$schematron")
-    if not isinstance(assertions, list):
-        return []
     findings: list[CheckFinding] = []
-    for index, assertion in enumerate(assertions):
-        if not isinstance(assertion, dict):
-            continue
+    for index, assertion in enumerate(schematron_assertions(rule.expectation)):
         part_name = assertion.get("part")
         schema_text = assertion.get("schema")
         if not isinstance(part_name, str) or not isinstance(schema_text, str):

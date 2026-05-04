@@ -875,6 +875,8 @@ def _llm_rule_candidates(
                     "才能返回 checkability=checkable；字段或范围不支持时必须返回 "
                     "checkability=unsupported 且 expectation={}，"
                     "不要把不支持项伪装为 needs_confirmation。"
+                    "如需表达事实层或 OOXML 结构断言，只能使用 capability_manifest.rule_dsl "
+                    "声明的 $dsl 形式。"
                     "示例：{\"rule_candidates\":[{\"category\":\"structure\","
                     "\"target_scope\":\"document.structure\",\"selector\":\"论文结构\","
                     "\"expectation\":{\"requiredSections\":[\"中文摘要\",\"正文\"]},"
