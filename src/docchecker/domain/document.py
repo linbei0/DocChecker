@@ -113,6 +113,26 @@ class TableFact(BaseModel):
     following_paragraph_index: int | None = None
 
 
+class CaptionFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    text: str
+    paragraph_index: int
+    position: str | None = None
+    target_index: int | None = None
+
+
+class TocFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    has_title: bool = False
+    has_field: bool = False
+    entry_count: int = 0
+    title_paragraph_index: int | None = None
+    entry_paragraph_indices: list[int] = Field(default_factory=list)
+
+
 class NumberingFact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,16 +175,50 @@ class EffectiveFormatFact(BaseModel):
     sources: dict[str, str | None] = Field(default_factory=dict)
 
 
+class ReferenceEntryFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraph_index: int
+    number: int | None = None
+    text: str
+
+
+class ReferenceFacts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    has_section: bool = False
+    section_start_paragraph_index: int | None = None
+    entry_count: int = 0
+    numbering_continuous: bool = False
+    entries: list[ReferenceEntryFact] = Field(default_factory=list)
+
+
+class AbstractFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str
+    title_paragraph_index: int
+    content_text: str = ""
+    word_count: int = 0
+    keyword_text: str | None = None
+    keyword_count: int = 0
+    has_keywords: bool = False
+
+
 class DocumentFacts(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     xml_parts: dict[str, str] = Field(default_factory=dict)
     headers_footers: list[HeaderFooterFact] = Field(default_factory=list)
     tables: list[TableFact] = Field(default_factory=list)
+    captions: list[CaptionFact] = Field(default_factory=list)
+    toc: TocFact = Field(default_factory=TocFact)
     numbering: list[NumberingFact] = Field(default_factory=list)
     fields: list[FieldFact] = Field(default_factory=list)
     styles: list[StyleFact] = Field(default_factory=list)
     effective_formats: list[EffectiveFormatFact] = Field(default_factory=list)
+    references: ReferenceFacts = Field(default_factory=ReferenceFacts)
+    abstracts: list[AbstractFact] = Field(default_factory=list)
 
 
 class DocumentModel(BaseModel):

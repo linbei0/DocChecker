@@ -6,6 +6,7 @@ from docchecker.checkers.page_setup import PageSetupChecker
 from docchecker.checkers.paragraph import ParagraphChecker
 from docchecker.checkers.property import PropertyChecker
 from docchecker.checkers.semantic import (
+    AbstractChecker,
     CaptionChecker,
     ReferenceChecker,
     StructureChecker,
@@ -31,6 +32,7 @@ class CheckEngine:
             TocChecker(),
             CaptionChecker(),
             ReferenceChecker(),
+            AbstractChecker(),
             PropertyChecker(),
             OoxmlRuleChecker(),
         ]

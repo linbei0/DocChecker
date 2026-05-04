@@ -12,6 +12,7 @@ export type CategoryFilter =
   | 'reference'
   | 'structure'
   | 'toc'
+  | 'abstract'
 
 export function filterFindings(
   findings: CheckFinding[],
@@ -37,6 +38,7 @@ export function categoryLabel(category: string | null | undefined) {
       reference: '参考文献',
       structure: '结构',
       toc: '目录',
+      abstract: '摘要',
     }[category || ''] || '未分类'
   )
 }

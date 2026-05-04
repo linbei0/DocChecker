@@ -718,6 +718,7 @@ def _local_rule_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRule
     candidates.extend(_caption_candidates(chunks))
     candidates.extend(_reference_candidates(chunks))
     candidates.extend(_header_footer_candidates(chunks))
+    candidates.extend(_abstract_candidates(chunks))
     return candidates
 
 
@@ -844,6 +845,66 @@ def _header_footer_candidates(chunks: list[RequirementChunk]) -> list[ExtractedR
     return candidates
 
 
+def _abstract_candidates(chunks: list[RequirementChunk]) -> list[ExtractedRuleCandidate]:
+    candidates: list[ExtractedRuleCandidate] = []
+    for chunk in chunks:
+        lower_text = chunk.text.lower()
+        if (
+            "摘要" not in chunk.text
+            and "abstract" not in lower_text
+            and "关键词" not in chunk.text
+            and "keywords" not in lower_text
+        ):
+            continue
+        expectation: dict[str, object] = {}
+        if _requires_abstract_presence(chunk.text, ("中文摘要", "摘要")):
+            expectation["requiresChineseAbstract"] = True
+        if _requires_abstract_presence(chunk.text, ("英文摘要", "Abstract")):
+            expectation["requiresEnglishAbstract"] = True
+        if _requires_abstract_presence(chunk.text, ("关键词", "Keywords")):
+            expectation["requiresKeywords"] = True
+        min_count = _word_count_requirement(chunk.text, minimum=True)
+        max_count = _word_count_requirement(chunk.text, minimum=False)
+        if min_count is not None:
+            expectation["minWordCount"] = min_count
+        if max_count is not None:
+            expectation["maxWordCount"] = max_count
+        if not expectation:
+            continue
+        candidates.append(
+            ExtractedRuleCandidate(
+                category=RuleCategory.abstract,
+                target_scope="document.abstract",
+                selector="摘要",
+                expectation=expectation,
+                evidence_span=chunk.text,
+                location=chunk.location,
+                checkability="checkable",
+                confidence=0.82,
+            )
+        )
+    return candidates
+
+
+def _requires_abstract_presence(text: str, names: tuple[str, ...]) -> bool:
+    for name in names:
+        escaped = re.escape(name)
+        if re.search(rf"(?:应|须|必须|需|需要|包括|包含).{{0,20}}{escaped}", text, flags=re.I):
+            return True
+        if re.search(rf"{escaped}.{{0,12}}(?:应包括|应包含|须包括|须包含|必备)", text, flags=re.I):
+            return True
+    return False
+
+
+def _word_count_requirement(text: str, *, minimum: bool) -> int | None:
+    if minimum:
+        pattern = r"(?:不少于|至少|不低于)\s*(\d+)\s*[字词]?"
+    else:
+        pattern = r"(?:不超过|不多于|少于|以内)\s*(\d+)\s*[字词]?"
+    match = re.search(pattern, text)
+    return int(match.group(1)) if match else None
+
+
 def _llm_rule_candidates(
     blocks: list[RequirementBlock],
 ) -> tuple[list[ExtractedRuleCandidate], list[RuleExtractionIssue], RuleExtractionStats]:
@@ -865,7 +926,7 @@ def _llm_rule_candidates(
                     "每条候选只能包含 category、target_scope、selector、expectation、"
                     "evidence_span、location、checkability、confidence、reason 字段。"
                     "category 只能是 page、font、paragraph、heading、header_footer、"
-                    "caption、reference、structure、toc 之一，禁止自造类别。"
+                    "caption、reference、structure、toc、abstract 之一，禁止自造类别。"
                     "checkability 只能是 checkable、needs_confirmation、unsupported 之一，"
                     "禁止使用 specific、vague 等其他值。"
                     "expectation 必须是 JSON object，不能是字符串；无法结构化时返回空对象。"

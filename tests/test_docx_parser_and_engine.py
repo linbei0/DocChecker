@@ -212,6 +212,39 @@ def test_parse_docx_reads_simple_field_facts(tmp_path: Path) -> None:
     assert model.facts.fields[0].part_name == "word/document.xml"
 
 
+def test_parse_docx_builds_phase4_high_frequency_facts(tmp_path: Path) -> None:
+    path = tmp_path / "phase4-facts.docx"
+    document = Document()
+    document.add_paragraph("摘 要")
+    document.add_paragraph("本文研究论文格式检查系统。")
+    document.add_paragraph("关键词：论文；格式检查")
+    document.add_paragraph("目 录")
+    document.styles.add_style("toc 1", WD_STYLE_TYPE.PARAGRAPH)
+    toc_field_paragraph = document.add_paragraph("1 绪论 1", style="toc 1")
+    toc_field = OxmlElement("w:fldSimple")
+    toc_field.set(qn("w:instr"), r"TOC \o \"1-3\"")
+    toc_field_paragraph._p.append(toc_field)
+    document.add_paragraph("参考文献")
+    document.add_paragraph("[1] 张三. 论文格式研究.")
+    document.add_paragraph("表1.1 基本要求")
+    document.add_table(rows=1, cols=1)
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="phase4-facts.docx")
+
+    assert model.facts.toc.has_title is True
+    assert model.facts.toc.has_field is True
+    assert model.facts.toc.entry_count == 1
+    assert model.facts.references.has_section is True
+    assert model.facts.references.entry_count == 1
+    assert model.facts.references.numbering_continuous is True
+    assert model.facts.abstracts[0].language == "zh"
+    assert model.facts.abstracts[0].has_keywords is True
+    assert model.facts.abstracts[0].keyword_count == 2
+    assert model.facts.captions[0].kind == "table"
+    assert model.facts.captions[0].position == "before"
+
+
 def test_parse_docx_resolves_east_asia_font_from_style_xml(tmp_path: Path) -> None:
     path = tmp_path / "heading-font.docx"
     document = Document()
@@ -589,6 +622,80 @@ def test_semantic_checkers_report_structure_and_reference_findings(tmp_path: Pat
 
     assert "structure_required_sections" in rule_ids
     assert "reference_basic_entries" in rule_ids
+
+
+def test_phase4_checkers_use_high_frequency_facts(tmp_path: Path) -> None:
+    path = tmp_path / "phase4-checkers.docx"
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "论文"
+    document.add_paragraph("摘 要")
+    document.add_paragraph("短摘要")
+    document.add_paragraph("目 录")
+    document.add_paragraph("参考文献")
+    document.add_paragraph("[2] 编号不连续参考文献")
+    document.add_table(rows=1, cols=1)
+    document.add_paragraph("表1.1 基本要求")
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="phase4-checkers.docx")
+    rules = [
+        FormatRule(
+            id="header_font",
+            category=RuleCategory.header_footer,
+            target=RuleTarget(scope="header.default"),
+            expectation={"fontSizePt": 10.5},
+            severity=Severity.minor,
+            source=RuleSource(type=SourceType.manual, excerpt="页眉五号字"),
+        ),
+        FormatRule(
+            id="toc_field",
+            category=RuleCategory.toc,
+            target=RuleTarget(scope="document.toc"),
+            expectation={"requiresToc": True, "requiresTocField": True},
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="目录自动生成"),
+        ),
+        FormatRule(
+            id="caption_position",
+            category=RuleCategory.caption,
+            target=RuleTarget(scope="document.caption"),
+            expectation={"requiresTableCaption": True, "tableCaptionPosition": "before"},
+            severity=Severity.minor,
+            source=RuleSource(type=SourceType.manual, excerpt="表题置于表上"),
+        ),
+        FormatRule(
+            id="reference_continuous",
+            category=RuleCategory.reference,
+            target=RuleTarget(scope="document.references"),
+            expectation={
+                "requiresSection": True,
+                "requiresReferences": True,
+                "numberingContinuous": True,
+            },
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="参考文献连续编号"),
+        ),
+        FormatRule(
+            id="abstract_requirements",
+            category=RuleCategory.abstract,
+            target=RuleTarget(scope="document.abstract"),
+            expectation={
+                "requiresChineseAbstract": True,
+                "requiresKeywords": True,
+                "minWordCount": 10,
+            },
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="摘要和关键词要求"),
+        ),
+    ]
+
+    findings = CheckEngine().run(model, rules)
+    rule_ids = {finding.rule_id for finding in findings}
+
+    assert "header_font" in rule_ids
+    assert "toc_field" in rule_ids
+    assert "caption_position" in rule_ids
+    assert "reference_continuous" in rule_ids
+    assert "abstract_requirements" in rule_ids
 
 
 def test_structure_checker_matches_common_section_aliases(tmp_path: Path) -> None:

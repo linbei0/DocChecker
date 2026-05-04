@@ -393,9 +393,12 @@ const categoryText: Record<string, string> = {
   paragraph: '段落',
   heading: '标题',
   page: '页面',
+  header_footer: '页眉页脚',
+  caption: '图表题注',
   reference: '参考文献',
   structure: '结构',
   toc: '目录',
+  abstract: '摘要',
 }
 
 const severityText: Record<string, string> = {
@@ -419,8 +422,11 @@ const targetScopeText: Record<string, string> = {
   paragraph: '段落',
   heading: '标题',
   table: '表格',
+  header_footer: '页眉页脚',
+  caption: '图表题注',
   reference: '参考文献',
   toc: '目录',
+  abstract: '摘要',
   page: '页面',
 }
 

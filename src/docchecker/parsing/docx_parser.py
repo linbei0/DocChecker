@@ -7,6 +7,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 from docchecker.domain.document import (
+    AbstractFact,
+    CaptionFact,
     DocumentFacts,
     DocumentModel,
     EffectiveFormatFact,
@@ -17,11 +19,14 @@ from docchecker.domain.document import (
     NumberingFact,
     ParagraphNode,
     ParseWarning,
+    ReferenceEntryFact,
+    ReferenceFacts,
     RunSpan,
     SectionNode,
     StyleFact,
     TableCellFact,
     TableFact,
+    TocFact,
 )
 
 EMU_PER_CM = 360000
@@ -466,22 +471,30 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
     if not paragraphs:
         warnings.append(ParseWarning(code="empty_document", message="文档没有可解析段落。"))
 
+    logical_sections = _build_logical_sections(paragraphs)
+    table_facts = _table_facts(document, paragraphs)
+    field_facts = [
+        fact
+        for index, paragraph in enumerate(document.paragraphs)
+        for fact in _field_facts(paragraph, index)
+    ]
+
     facts = DocumentFacts(
         xml_parts=xml_parts,
         headers_footers=_header_footer_facts(document, default_font_name),
-        tables=_table_facts(document, paragraphs),
+        tables=table_facts,
+        captions=_caption_facts(paragraphs, table_facts),
+        toc=_toc_fact(paragraphs, field_facts),
         numbering=[
             fact
             for index, paragraph in enumerate(document.paragraphs)
             if (fact := _numbering_fact(paragraph, index)) is not None
         ],
-        fields=[
-            fact
-            for index, paragraph in enumerate(document.paragraphs)
-            for fact in _field_facts(paragraph, index)
-        ],
+        fields=field_facts,
         styles=_style_facts(document),
         effective_formats=_effective_format_facts(paragraphs),
+        references=_reference_facts(paragraphs, logical_sections),
+        abstracts=_abstract_facts(paragraphs, logical_sections),
     )
 
     return DocumentModel(
@@ -489,7 +502,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
         source_filename=source_filename,
         package_parts=package_parts,
         sections=sections,
-        logical_sections=_build_logical_sections(paragraphs),
+        logical_sections=logical_sections,
         paragraphs=paragraphs,
         table_count=len(document.tables),
         image_count=image_count,
@@ -628,6 +641,64 @@ def _is_table_caption_text(text: str) -> bool:
     return bool(re.match(r"^\s*表\s*\d+(?:[.\-]\d+)*", text))
 
 
+def _caption_facts(
+    paragraphs: list[ParagraphNode],
+    tables: list[TableFact],
+) -> list[CaptionFact]:
+    linked_tables: dict[int, tuple[str, int]] = {}
+    for table in tables:
+        if table.caption_position == "before" and table.preceding_paragraph_index is not None:
+            linked_tables[table.preceding_paragraph_index] = ("before", table.index)
+        if table.caption_position == "after" and table.following_paragraph_index is not None:
+            linked_tables[table.following_paragraph_index] = ("after", table.index)
+
+    facts: list[CaptionFact] = []
+    for paragraph in paragraphs:
+        kind = _caption_kind(paragraph.text)
+        if kind is None:
+            continue
+        position, target_index = linked_tables.get(paragraph.index, ("standalone", None))
+        facts.append(
+            CaptionFact(
+                kind=kind,
+                text=paragraph.text.strip(),
+                paragraph_index=paragraph.index,
+                position=position,
+                target_index=target_index,
+            )
+        )
+    return facts
+
+
+def _caption_kind(text: str) -> str | None:
+    if re.match(r"^\s*表\s*\d+(?:[.\-]\d+)*", text):
+        return "table"
+    if re.match(r"^\s*图\s*\d+(?:[.\-]\d+)*", text):
+        return "figure"
+    return None
+
+
+def _toc_fact(paragraphs: list[ParagraphNode], fields: list[FieldFact]) -> TocFact:
+    title_index = next(
+        (
+            paragraph.index
+            for paragraph in paragraphs
+            if _normalize_section_text(paragraph.text) in {"目录", "目次"}
+        ),
+        None,
+    )
+    entry_indices = [
+        paragraph.index for paragraph in paragraphs if _is_toc_entry(paragraph)
+    ]
+    return TocFact(
+        has_title=title_index is not None,
+        has_field=any(field.field_type == "TOC" for field in fields),
+        entry_count=len(entry_indices),
+        title_paragraph_index=title_index,
+        entry_paragraph_indices=entry_indices,
+    )
+
+
 def _numbering_fact(paragraph, index: int) -> NumberingFact | None:
     p_pr = getattr(paragraph._p, "pPr", None)
     num_pr = getattr(p_pr, "numPr", None) if p_pr is not None else None
@@ -673,6 +744,151 @@ def _field_facts(paragraph, index: int) -> list[FieldFact]:
             )
         )
     return facts
+
+
+def _reference_facts(
+    paragraphs: list[ParagraphNode],
+    logical_sections: list[LogicalSectionNode],
+) -> ReferenceFacts:
+    reference_section = next(
+        (section for section in logical_sections if section.role == "references"),
+        None,
+    )
+    if reference_section is None:
+        candidate_paragraphs = paragraphs
+    else:
+        end_index = reference_section.end_paragraph_index or paragraphs[-1].index
+        candidate_paragraphs = [
+            paragraph
+            for paragraph in paragraphs
+            if reference_section.start_paragraph_index < paragraph.index <= end_index
+        ]
+    entries = [
+        ReferenceEntryFact(
+            paragraph_index=paragraph.index,
+            number=_reference_number(paragraph.text),
+            text=paragraph.text,
+        )
+        for paragraph in candidate_paragraphs
+        if _reference_number(paragraph.text) is not None
+    ]
+    numbers = [entry.number for entry in entries]
+    expected = list(range(1, len(entries) + 1))
+    return ReferenceFacts(
+        has_section=reference_section is not None,
+        section_start_paragraph_index=(
+            reference_section.start_paragraph_index if reference_section else None
+        ),
+        entry_count=len(entries),
+        numbering_continuous=bool(entries) and numbers == expected,
+        entries=entries,
+    )
+
+
+def _reference_number(text: str) -> int | None:
+    match = re.match(r"^\s*\[(\d+)]", text)
+    return int(match.group(1)) if match else None
+
+
+def _abstract_facts(
+    paragraphs: list[ParagraphNode],
+    logical_sections: list[LogicalSectionNode],
+) -> list[AbstractFact]:
+    facts: list[AbstractFact] = []
+    for section_index, section in enumerate(logical_sections):
+        if section.role != "abstract":
+            continue
+        end_index = section.end_paragraph_index or paragraphs[-1].index
+        content_paragraphs = [
+            paragraph
+            for paragraph in paragraphs
+            if section.start_paragraph_index < paragraph.index <= end_index
+        ]
+        keyword = next(
+            (
+                paragraph.text.strip()
+                for paragraph in content_paragraphs
+                if _is_keyword_paragraph(paragraph.text)
+            ),
+            None,
+        )
+        if keyword is None:
+            keyword = _following_keyword_text(paragraphs, logical_sections, section_index)
+        content_text = "\n".join(
+            paragraph.text.strip()
+            for paragraph in content_paragraphs
+            if paragraph.text.strip() and not _is_keyword_paragraph(paragraph.text)
+        )
+        facts.append(
+            AbstractFact(
+                language=_abstract_language(section.title),
+                title_paragraph_index=section.start_paragraph_index,
+                content_text=content_text,
+                word_count=_abstract_word_count(content_text),
+                keyword_text=keyword,
+                keyword_count=_keyword_count(keyword),
+                has_keywords=keyword is not None,
+            )
+        )
+    return facts
+
+
+def _following_keyword_text(
+    paragraphs: list[ParagraphNode],
+    logical_sections: list[LogicalSectionNode],
+    section_index: int,
+) -> str | None:
+    if section_index + 1 >= len(logical_sections):
+        return None
+    next_section = logical_sections[section_index + 1]
+    if next_section.role != "keywords":
+        return None
+    end_index = next_section.end_paragraph_index or paragraphs[-1].index
+    return next(
+        (
+            paragraph.text.strip()
+            for paragraph in paragraphs
+            if next_section.start_paragraph_index <= paragraph.index <= end_index
+            and _is_keyword_paragraph(paragraph.text)
+        ),
+        None,
+    )
+
+
+def _abstract_language(title: str) -> str:
+    normalized = title.lower()
+    if "英文" in title or "abstract" in normalized:
+        return "en"
+    return "zh"
+
+
+def _abstract_word_count(text: str) -> int:
+    chinese_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    ascii_words = re.findall(r"[A-Za-z]+(?:[-'][A-Za-z]+)?", text)
+    return len(chinese_chars) + len(ascii_words)
+
+
+def _is_keyword_paragraph(text: str) -> bool:
+    normalized = _normalize_section_text(text)
+    return (
+        normalized.startswith("关键词")
+        or normalized.startswith("关键字")
+        or normalized.startswith("keywords")
+        or normalized.startswith("key words")
+    )
+
+
+def _keyword_count(text: str | None) -> int:
+    if not text:
+        return 0
+    values = re.sub(
+        r"^\s*(关键词|关键字|keywords|key words)\s*[:：]?",
+        "",
+        text,
+        flags=re.I,
+    )
+    parts = [part.strip() for part in re.split(r"[;；,，、\s]+", values) if part.strip()]
+    return len(parts)
 
 
 def _effective_format_facts(paragraphs: list[ParagraphNode]) -> list[EffectiveFormatFact]:

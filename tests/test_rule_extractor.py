@@ -150,6 +150,26 @@ def test_extract_rules_maps_semantic_requirements_to_checkable_rules(
     assert result.extraction_summary.unsupported_requirements == 0
 
 
+def test_extract_rules_maps_abstract_requirements_to_checkable_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "local")
+    get_settings.cache_clear()
+    result = extract_rules_from_text(
+        "论文应包含中文摘要、英文摘要和关键词，摘要不少于300字。",
+        source_type=SourceType.requirement_doc,
+    )
+
+    rule = next(rule for rule in result.rules if rule.id == "abstract_basic_requirements")
+
+    assert rule.category.value == "abstract"
+    assert rule.expectation["requiresChineseAbstract"] is True
+    assert rule.expectation["requiresEnglishAbstract"] is True
+    assert rule.expectation["requiresKeywords"] is True
+    assert rule.expectation["minWordCount"] == 300
+    assert not any(item.category.value == "abstract" for item in result.unsupported_requirements)
+
+
 def test_extract_rules_does_not_treat_caption_or_abstract_notes_as_body_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

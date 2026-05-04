@@ -184,11 +184,14 @@ def _candidate_rule_id(candidate: ExtractedRuleCandidate) -> str:
         RuleCategory.caption: "caption_basic_pattern",
         RuleCategory.reference: "reference_basic_entries",
         RuleCategory.header_footer: "header_footer_basic",
+        RuleCategory.abstract: "abstract_basic_requirements",
     }.get(candidate.category, f"{candidate.category.value}_candidate")
 
 
 def _candidate_severity(category: RuleCategory) -> Severity:
-    return Severity.major if category == RuleCategory.structure else Severity.minor
+    if category in {RuleCategory.structure, RuleCategory.abstract}:
+        return Severity.major
+    return Severity.minor
 
 
 def _normalize_expectation(

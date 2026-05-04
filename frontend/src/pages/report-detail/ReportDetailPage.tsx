@@ -41,6 +41,7 @@ const categoryFilters: Array<{ key: CategoryFilter; label: string }> = [
   { key: 'reference', label: '参考文献' },
   { key: 'structure', label: '结构' },
   { key: 'toc', label: '目录' },
+  { key: 'abstract', label: '摘要' },
 ]
 
 export function ReportDetailPage() {

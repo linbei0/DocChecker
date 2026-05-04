@@ -61,19 +61,9 @@ class TocChecker:
 
     def check(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
         findings: list[CheckFinding] = []
-        paragraphs = _nonempty_paragraphs(document)
-        toc_entries = [
-            paragraph
-            for paragraph in paragraphs
-            if (
-                paragraph.style_name
-                and "toc" in paragraph.style_name.lower()
-                or bool(re.match(r"^\d+(?:\.\d+){0,3}\s+.+\s+\d+$", paragraph.text))
-            )
-        ]
-        has_toc_title = any(paragraph.text.replace(" ", "") == "目录" for paragraph in paragraphs)
+        toc_fact = document.facts.toc
         for rule in relevant_rules(rules, self.supported_categories):
-            if rule.expectation.get("requiresToc") and not has_toc_title:
+            if rule.expectation.get("requiresToc") and not toc_fact.has_title:
                 findings.append(
                     _document_finding(
                         rule,
@@ -84,7 +74,7 @@ class TocChecker:
                         "请生成或补充目录，并确认目录标题为“目录”。",
                     )
                 )
-            if rule.expectation.get("requiresEntries") and not toc_entries:
+            if rule.expectation.get("requiresEntries") and toc_fact.entry_count == 0:
                 findings.append(
                     _document_finding(
                         rule,
@@ -93,6 +83,29 @@ class TocChecker:
                         {"tocEntries": "未检测到目录项"},
                         "论文未检测到符合基本形态的目录项。",
                         "请检查目录是否自动生成，至少包含编号、标题和页码列。",
+                    )
+                )
+            if rule.expectation.get("requiresTocField") and not toc_fact.has_field:
+                findings.append(
+                    _document_finding(
+                        rule,
+                        self.checker_id,
+                        {"requiresTocField": True},
+                        {"requiresTocField": False},
+                        "论文未检测到 Word TOC 目录域。",
+                        "请使用 Word 自动目录域生成目录，而不是手工录入目录文本。",
+                    )
+                )
+            min_entry_count = rule.expectation.get("minEntryCount")
+            if isinstance(min_entry_count, int | float) and toc_fact.entry_count < min_entry_count:
+                findings.append(
+                    _document_finding(
+                        rule,
+                        self.checker_id,
+                        {"minEntryCount": min_entry_count},
+                        {"entryCount": toc_fact.entry_count},
+                        "目录条目数量少于规则要求。",
+                        "请确认目录已覆盖规定层级的标题。",
                     )
                 )
         return findings
@@ -104,29 +117,86 @@ class CaptionChecker:
 
     def check(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
         findings: list[CheckFinding] = []
-        captions = [
-            paragraph
-            for paragraph in _nonempty_paragraphs(document)
-            if re.match(r"^[图表]\s*\d+(?:[.-]\d+)*", paragraph.text)
-        ]
+        paragraph_by_index = {paragraph.index: paragraph for paragraph in document.paragraphs}
         for rule in relevant_rules(rules, self.supported_categories):
+            if rule.expectation.get("requiresTableCaption") is True:
+                missing = [
+                    table.index
+                    for table in document.facts.tables
+                    if not table.caption_text
+                ]
+                if missing:
+                    findings.append(
+                        _document_finding(
+                            rule,
+                            self.checker_id,
+                            {"requiresTableCaption": True},
+                            {"missingTableCaptionIndexes": missing},
+                            "存在未检测到表题的表格。",
+                            "请为每个表格补充表题，并放在规范要求的位置。",
+                        )
+                    )
+            expected_position = rule.expectation.get("tableCaptionPosition")
+            if expected_position in {"before", "after"}:
+                misplaced = [
+                    table.index
+                    for table in document.facts.tables
+                    if table.caption_text and table.caption_position != expected_position
+                ]
+                if misplaced:
+                    findings.append(
+                        _document_finding(
+                            rule,
+                            self.checker_id,
+                            {"tableCaptionPosition": expected_position},
+                            {"misplacedTableCaptionIndexes": misplaced},
+                            "表题位置不符合规则要求。",
+                            "请按规则要求把表题放在表格上方或下方。",
+                        )
+                    )
             invalid = [
-                paragraph
-                for paragraph in captions
-                if not re.match(r"^[图表]\d+(?:\.\d+)+\s+\S+", paragraph.text)
+                caption
+                for caption in document.facts.captions
+                if not _valid_caption_text(caption.text)
             ]
-            for paragraph in invalid:
+            for caption in invalid:
+                paragraph = paragraph_by_index.get(caption.paragraph_index)
+                if paragraph is None:
+                    continue
                 findings.append(
                     _paragraph_finding(
                         rule,
                         self.checker_id,
                         paragraph,
                         {"captionPattern": "图1.1 题名 / 表1.1 题名"},
-                        {"caption": paragraph.text},
-                        f"题注编号或空格格式不符合规则：{paragraph.text}",
+                        {"caption": caption.text},
+                        f"题注编号或空格格式不符合规则：{caption.text}",
                         "请按“图1.1 题名”或“表1.1 题名”的格式调整题注。",
                     )
                 )
+            for field, attr in [
+                ("fontFamilyEastAsia", "font_family_east_asia"),
+                ("fontSizePt", "font_size_pt"),
+                ("alignment", "alignment"),
+            ]:
+                expected = rule.expectation.get(field)
+                if expected is None:
+                    continue
+                for caption in document.facts.captions:
+                    paragraph = paragraph_by_index.get(caption.paragraph_index)
+                    if paragraph is None or getattr(paragraph, attr) == expected:
+                        continue
+                    findings.append(
+                        _paragraph_finding(
+                            rule,
+                            self.checker_id,
+                            paragraph,
+                            {field: expected},
+                            {field: getattr(paragraph, attr)},
+                            "题注段落格式不符合规则要求。",
+                            "请调整图题、表题的字体、字号或对齐方式。",
+                        )
+                    )
         return findings
 
 
@@ -138,9 +208,28 @@ class ReferenceChecker:
         findings: list[CheckFinding] = []
         paragraphs = _nonempty_paragraphs(document)
         references = [
-            paragraph for paragraph in paragraphs if re.match(r"^\[\d+\]", paragraph.text)
+            paragraph
+            for paragraph in paragraphs
+            if any(
+                entry.paragraph_index == paragraph.index
+                for entry in document.facts.references.entries
+            )
         ]
         for rule in relevant_rules(rules, self.supported_categories):
+            if (
+                rule.expectation.get("requiresSection")
+                and not document.facts.references.has_section
+            ):
+                findings.append(
+                    _document_finding(
+                        rule,
+                        self.checker_id,
+                        {"requiresSection": True},
+                        {"requiresSection": False},
+                        "论文未检测到参考文献章节标题。",
+                        "请补充参考文献章节，并将参考文献条目放在该章节下。",
+                    )
+                )
             if rule.expectation.get("requiresReferences") and not references:
                 findings.append(
                     _document_finding(
@@ -153,9 +242,9 @@ class ReferenceChecker:
                     )
                 )
                 continue
-            expected = list(range(1, len(references) + 1))
-            actual = [_reference_number(paragraph.text) for paragraph in references]
-            if actual != expected:
+            actual = [entry.number for entry in document.facts.references.entries]
+            expected = list(range(1, len(actual) + 1))
+            if rule.expectation.get("numberingContinuous", True) and actual != expected:
                 findings.append(
                     _document_finding(
                         rule,
@@ -178,6 +267,72 @@ class ReferenceChecker:
                             f"参考文献条目信息可能不完整：{paragraph.text}",
                             "请补充作者、题名、来源、年份等基本著录信息。",
                         )
+                    )
+        return findings
+
+
+class AbstractChecker:
+    checker_id = "abstract_checker"
+    supported_categories = {RuleCategory.abstract}
+
+    def check(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
+        findings: list[CheckFinding] = []
+        zh_abstract = next(
+            (fact for fact in document.facts.abstracts if fact.language == "zh"),
+            None,
+        )
+        en_abstract = next(
+            (fact for fact in document.facts.abstracts if fact.language == "en"),
+            None,
+        )
+        for rule in relevant_rules(rules, self.supported_categories):
+            if rule.expectation.get("requiresChineseAbstract") and zh_abstract is None:
+                findings.append(
+                    _document_finding(
+                        rule,
+                        self.checker_id,
+                        {"requiresChineseAbstract": True},
+                        {"requiresChineseAbstract": False},
+                        "论文未检测到中文摘要。",
+                        "请补充中文摘要章节。",
+                    )
+                )
+            if rule.expectation.get("requiresEnglishAbstract") and en_abstract is None:
+                findings.append(
+                    _document_finding(
+                        rule,
+                        self.checker_id,
+                        {"requiresEnglishAbstract": True},
+                        {"requiresEnglishAbstract": False},
+                        "论文未检测到英文摘要。",
+                        "请补充英文摘要或 Abstract 章节。",
+                    )
+                )
+            if rule.expectation.get("requiresKeywords"):
+                missing_keywords = [
+                    fact.language for fact in document.facts.abstracts if not fact.has_keywords
+                ]
+                if missing_keywords:
+                    findings.append(
+                        _document_finding(
+                            rule,
+                            self.checker_id,
+                            {"requiresKeywords": True},
+                            {"abstractsMissingKeywords": missing_keywords},
+                            "摘要章节未检测到关键词段落。",
+                            "请在摘要后补充关键词或 Keywords 段落。",
+                        )
+                    )
+            for fact in document.facts.abstracts:
+                min_count = rule.expectation.get("minWordCount")
+                max_count = rule.expectation.get("maxWordCount")
+                if isinstance(min_count, int | float) and fact.word_count < min_count:
+                    findings.append(
+                        _abstract_count_finding(rule, fact, {"minWordCount": min_count})
+                    )
+                if isinstance(max_count, int | float) and fact.word_count > max_count:
+                    findings.append(
+                        _abstract_count_finding(rule, fact, {"maxWordCount": max_count})
                     )
         return findings
 
@@ -311,6 +466,10 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"[\s　:：]+", "", value).lower()
 
 
+def _valid_caption_text(text: str) -> bool:
+    return bool(re.match(r"^\s*[图表]\s*\d+(?:\.\d+)+\s+\S+", text))
+
+
 def _document_excerpt(paragraphs: list[ParagraphNode]) -> str | None:
     snippets = [
         paragraph.text.strip()
@@ -380,4 +539,28 @@ def _paragraph_finding(
         excerpt=paragraph.text[:120],
         evidence=evidence,
         suggestion=suggestion,
+    )
+
+
+def _abstract_count_finding(
+    rule: FormatRule,
+    fact,
+    expected: dict[str, object],
+) -> CheckFinding:
+    return CheckFinding(
+        id=f"{rule.id}:abstract-{fact.language}:{next(iter(expected))}",
+        rule_id=rule.id,
+        checker_id="abstract_checker",
+        category=rule.category,
+        severity=rule.severity,
+        location=FindingLocation(
+            display_path=f"{'中文' if fact.language == 'zh' else '英文'}摘要",
+            paragraph_index=fact.title_paragraph_index,
+            paragraph_number=fact.title_paragraph_index + 1,
+        ),
+        expected=expected,
+        actual={"wordCount": fact.word_count},
+        excerpt=fact.content_text[:120],
+        evidence="摘要字数不符合规则要求。",
+        suggestion="请按规范调整摘要篇幅。",
     )

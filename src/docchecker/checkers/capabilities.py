@@ -106,30 +106,68 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
     ),
     CheckerCapability(
         category=RuleCategory.header_footer,
-        fields=frozenset({"textContains", "requiresPageNumber"}),
+        fields=frozenset(
+            {
+                "textContains",
+                "requiresPageNumber",
+                "fontFamilyEastAsia",
+                "fontSizePt",
+            }
+        ),
         scope_prefixes=("document.header_footer", "header_footer", "header", "footer"),
         field_descriptions={
             "textContains": "页眉或页脚必须包含的文本片段。",
             "requiresPageNumber": "页眉或页脚是否必须包含页码域或页码文本。",
+            "fontFamilyEastAsia": "页眉页脚中文字体名称。",
+            "fontSizePt": "页眉页脚字号，单位磅。",
         },
-        example_expectation={"requiresPageNumber": True},
+        example_expectation={"requiresPageNumber": True, "fontSizePt": 10.5},
     ),
     CheckerCapability(
         category=RuleCategory.caption,
-        fields=frozenset({"captionPattern"}),
+        fields=frozenset(
+            {
+                "captionPattern",
+                "requiresTableCaption",
+                "tableCaptionPosition",
+                "fontFamilyEastAsia",
+                "fontSizePt",
+                "alignment",
+            }
+        ),
         scope_prefixes=("document.caption", "caption"),
-        field_descriptions={"captionPattern": "图题、表题编号和题名模式。"},
-        example_expectation={"captionPattern": "图1.1 题名 / 表1.1 题名"},
+        field_descriptions={
+            "captionPattern": "图题、表题编号和题名模式。",
+            "requiresTableCaption": "每个表格是否必须有表题。",
+            "tableCaptionPosition": "表题相对表格的位置：before 或 after。",
+            "fontFamilyEastAsia": "图题、表题中文字体名称。",
+            "fontSizePt": "图题、表题字号，单位磅。",
+            "alignment": "图题、表题段落对齐方式。",
+        },
+        example_expectation={
+            "captionPattern": "图1.1 题名 / 表1.1 题名",
+            "requiresTableCaption": True,
+            "tableCaptionPosition": "before",
+        },
     ),
     CheckerCapability(
         category=RuleCategory.reference,
-        fields=frozenset({"requiresReferences", "numbering"}),
+        fields=frozenset(
+            {"requiresReferences", "requiresSection", "numbering", "numberingContinuous"}
+        ),
         scope_prefixes=("document.references", "reference"),
         field_descriptions={
             "requiresReferences": "是否必须包含参考文献章节。",
+            "requiresSection": "是否必须有参考文献标题或章节。",
             "numbering": "参考文献编号模式，例如 bracketed。",
+            "numberingContinuous": "参考文献编号是否必须从 1 开始连续。",
         },
-        example_expectation={"requiresReferences": True, "numbering": "bracketed"},
+        example_expectation={
+            "requiresReferences": True,
+            "requiresSection": True,
+            "numbering": "bracketed",
+            "numberingContinuous": True,
+        },
     ),
     CheckerCapability(
         category=RuleCategory.structure,
@@ -140,13 +178,44 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
     ),
     CheckerCapability(
         category=RuleCategory.toc,
-        fields=frozenset({"requiresToc", "requiresEntries"}),
+        fields=frozenset({"requiresToc", "requiresEntries", "requiresTocField", "minEntryCount"}),
         scope_prefixes=("document.toc", "toc"),
         field_descriptions={
             "requiresToc": "是否必须包含目录。",
             "requiresEntries": "目录是否必须包含条目。",
+            "requiresTocField": "目录是否必须使用 Word TOC 域生成。",
+            "minEntryCount": "目录最少条目数。",
         },
-        example_expectation={"requiresToc": True, "requiresEntries": True},
+        example_expectation={
+            "requiresToc": True,
+            "requiresEntries": True,
+            "requiresTocField": True,
+        },
+    ),
+    CheckerCapability(
+        category=RuleCategory.abstract,
+        fields=frozenset(
+            {
+                "requiresChineseAbstract",
+                "requiresEnglishAbstract",
+                "requiresKeywords",
+                "minWordCount",
+                "maxWordCount",
+            }
+        ),
+        scope_prefixes=("document.abstract", "abstract"),
+        field_descriptions={
+            "requiresChineseAbstract": "是否必须包含中文摘要。",
+            "requiresEnglishAbstract": "是否必须包含英文摘要。",
+            "requiresKeywords": "摘要部分是否必须包含关键词。",
+            "minWordCount": "摘要最少字词数。",
+            "maxWordCount": "摘要最多字词数。",
+        },
+        example_expectation={
+            "requiresChineseAbstract": True,
+            "requiresKeywords": True,
+            "minWordCount": 300,
+        },
     ),
 )
 

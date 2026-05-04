@@ -18,6 +18,7 @@ class RuleCategory(StrEnum):
     reference = "reference"
     structure = "structure"
     toc = "toc"
+    abstract = "abstract"
 
 
 class SourceType(StrEnum):
