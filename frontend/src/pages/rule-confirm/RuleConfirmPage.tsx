@@ -506,7 +506,7 @@ function buildReviewItems(
           ),
       )
       .map((requirement, index) => ({
-        id: `unsupported:${requirement.location || index}:${requirement.excerpt}`,
+        id: `unsupported:${requirement.category}:${requirement.location || index}:${requirement.excerpt}`,
         kind: 'unsupported' as const,
         title: requirement.target_scope || requirement.location || requirement.category,
         requirement,
@@ -553,6 +553,9 @@ function matchesFilter(item: ReviewItem, filter: ReviewFilter): boolean {
       return ['invalid_llm_response', 'llm_not_configured'].includes(
         item.requirement.reason_code || '',
       )
+    }
+    if (filter === 'confirmation') {
+      return item.requirement.capability_status === 'needs_confirmation'
     }
     return filter === 'unsupported' && item.requirement.capability_status === 'unsupported'
   }
@@ -878,9 +881,8 @@ function RuleRow({
           <ToggleSwitch
             enabled={isEnabled}
             onToggle={onToggle}
-            label={`${isEnabled ? '禁用' : '启用'}规则：${rule.category}，${
-              rule.target.selector || rule.target.scope
-            }`}
+            label={`${isEnabled ? '禁用' : '启用'}规则：${rule.category}，${rule.target.selector || rule.target.scope
+              }`}
           />
         </td>
         <td className="px-4 py-3.5 text-sm font-medium text-neutral-900 sm:px-6">
