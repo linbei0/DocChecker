@@ -3,6 +3,10 @@ from uuid import uuid4
 
 from fastapi import UploadFile
 
+from docchecker.services.docx_validator import DocumentValidationError
+
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 
 class StoredFile:
     def __init__(self, document_id: str, original_filename: str, path: Path) -> None:
@@ -19,13 +23,24 @@ class LocalFileStorage:
         self.documents_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
-    async def save_upload(self, upload: UploadFile) -> StoredFile:
+    async def save_upload(self, upload: UploadFile, *, max_size_bytes: int) -> StoredFile:
         document_id = f"doc_{uuid4().hex}"
         extension = Path(upload.filename or "").suffix.lower()
         path = self.documents_dir / f"{document_id}{extension}"
-        with path.open("wb") as target:
-            while chunk := await upload.read(1024 * 1024):
-                target.write(chunk)
+        bytes_written = 0
+        try:
+            with path.open("wb") as target:
+                while chunk := await upload.read(UPLOAD_CHUNK_SIZE):
+                    next_size = bytes_written + len(chunk)
+                    if next_size > max_size_bytes:
+                        raise DocumentValidationError(
+                            f"文件大小 {next_size} bytes 超过限制 {max_size_bytes} bytes。"
+                        )
+                    bytes_written = next_size
+                    target.write(chunk)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
         return StoredFile(document_id, upload.filename or "unknown.docx", path)
 
     def report_path(self, report_id: str) -> Path:

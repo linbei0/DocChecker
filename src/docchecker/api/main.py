@@ -119,8 +119,9 @@ UploadWordFile = Annotated[UploadFile, File(...)]
 
 @app.post("/api/documents", response_model=UploadedDocumentResponse)
 async def upload_document(file: UploadWordFile) -> UploadedDocumentResponse:
-    stored = await storage.save_upload(file)
+    stored = None
     try:
+        stored = await storage.save_upload(file, max_size_bytes=settings.max_document_size_bytes)
         prepared = prepare_word_document(
             stored.path,
             max_size_bytes=settings.max_document_size_bytes,
@@ -128,7 +129,8 @@ async def upload_document(file: UploadWordFile) -> UploadedDocumentResponse:
             conversion_timeout_seconds=settings.libreoffice_conversion_timeout_seconds,
         )
     except DocumentValidationError as exc:
-        _cleanup_failed_upload(stored.path)
+        if stored is not None:
+            _cleanup_failed_upload(stored.path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     record = UploadedDocumentRecord(
         id=stored.document_id,
@@ -155,8 +157,9 @@ async def upload_document(file: UploadWordFile) -> UploadedDocumentResponse:
 
 @app.post("/api/requirement-documents", response_model=RequirementDocument)
 async def upload_requirement_document(file: UploadWordFile) -> RequirementDocument:
-    stored = await storage.save_upload(file)
+    stored = None
     try:
+        stored = await storage.save_upload(file, max_size_bytes=settings.max_requirement_size_bytes)
         prepared = prepare_word_document(
             stored.path,
             max_size_bytes=settings.max_requirement_size_bytes,
@@ -168,7 +171,8 @@ async def upload_requirement_document(file: UploadWordFile) -> RequirementDocume
             f"{block.location}\t{block.text}" for block in parsed_requirement.blocks if block.text
         )
     except DocumentValidationError as exc:
-        _cleanup_failed_upload(stored.path)
+        if stored is not None:
+            _cleanup_failed_upload(stored.path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     requirement_document = RequirementDocument(
         id=f"req_{uuid4().hex}",

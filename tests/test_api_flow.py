@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -208,4 +209,30 @@ def test_upload_document_cleans_file_when_persistence_fails(
         )
 
     assert document_response.status_code == 500
+    assert list(main.storage.documents_dir.iterdir()) == []
+
+
+def test_upload_document_rejects_oversized_file_during_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_prepare_word_document(*args, **kwargs):
+        raise AssertionError("prepare_word_document should not run for oversized uploads")
+
+    monkeypatch.setattr(main.settings, "max_document_size_bytes", 4)
+    monkeypatch.setattr(main, "prepare_word_document", fail_prepare_word_document)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    document_response = client.post(
+        "/api/documents",
+        files={
+            "file": (
+                "paper.docx",
+                BytesIO(b"abcde"),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert document_response.status_code == 400
+    assert "超过限制" in document_response.json()["detail"]
     assert list(main.storage.documents_dir.iterdir()) == []
