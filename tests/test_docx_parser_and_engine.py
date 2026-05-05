@@ -212,6 +212,31 @@ def test_parse_docx_reads_simple_field_facts(tmp_path: Path) -> None:
     assert model.facts.fields[0].part_name == "word/document.xml"
 
 
+def test_header_footer_scope_checks_footer_page_number_xml(tmp_path: Path) -> None:
+    path = tmp_path / "footer-page.docx"
+    document = Document()
+    footer_paragraph = document.sections[0].footer.paragraphs[0]
+    footer_paragraph.text = ""
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    footer_paragraph._p.append(field)
+    document.add_paragraph("正文内容")
+    document.save(path)
+    model = parse_docx(path, document_id="doc_1", source_filename="footer-page.docx")
+    rule = FormatRule(
+        id="header_footer_basic",
+        category=RuleCategory.header_footer,
+        target=RuleTarget(scope="document.header_footer"),
+        expectation={"requiresPageNumber": True},
+        severity=Severity.minor,
+        source=RuleSource(type=SourceType.manual, excerpt="页眉页脚应包含页码。"),
+    )
+
+    findings = CheckEngine().run(model, [rule])
+
+    assert not any(finding.rule_id == "header_footer_basic" for finding in findings)
+
+
 def test_parse_docx_builds_phase4_high_frequency_facts(tmp_path: Path) -> None:
     path = tmp_path / "phase4-facts.docx"
     document = Document()

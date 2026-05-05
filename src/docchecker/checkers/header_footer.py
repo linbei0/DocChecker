@@ -64,9 +64,11 @@ class HeaderFooterChecker:
 
 def _matches_scope(kind: str, rule: FormatRule) -> bool:
     scope = rule.target.scope.lower()
-    if "header" in scope or "页眉" in scope:
+    if "header_footer" in scope or "页眉页脚" in scope:
+        return True
+    if _scope_targets_header(scope):
         return kind.startswith("header")
-    if "footer" in scope or "页脚" in scope:
+    if _scope_targets_footer(scope):
         return kind.startswith("footer")
     return True
 
@@ -92,11 +94,21 @@ def _has_page_number(document: DocumentModel, rule: FormatRule) -> bool:
 
 def _part_matches_scope(part_name: str, rule: FormatRule) -> bool:
     scope = rule.target.scope.lower()
-    if "header" in scope or "页眉" in scope:
+    if "header_footer" in scope or "页眉页脚" in scope:
+        return "header" in part_name or "footer" in part_name
+    if _scope_targets_header(scope):
         return "header" in part_name
-    if "footer" in scope or "页脚" in scope:
+    if _scope_targets_footer(scope):
         return "footer" in part_name
     return "header" in part_name or "footer" in part_name or part_name == "word/document.xml"
+
+
+def _scope_targets_header(scope: str) -> bool:
+    return any(part == "header" for part in scope.split(".")) or "页眉" in scope
+
+
+def _scope_targets_footer(scope: str) -> bool:
+    return any(part == "footer" for part in scope.split(".")) or "页脚" in scope
 
 
 def _header_footer_format_values(facts, field: str) -> list[object]:
