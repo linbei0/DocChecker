@@ -210,6 +210,13 @@ def update_ruleset(ruleset_id: str, request: UpdateRuleSetRequest) -> RuleSet:
     return updated
 
 
+@app.delete("/api/rulesets/{ruleset_id}")
+def delete_ruleset(ruleset_id: str) -> dict[str, bool | str]:
+    if not state_store.delete_ruleset(ruleset_id):
+        raise HTTPException(status_code=404, detail="规则集不存在。")
+    return {"id": ruleset_id, "deleted": True}
+
+
 @app.post("/api/draft-rulesets", response_model=DraftRuleSet)
 def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
     document = state_store.get_document(request.document_id)
@@ -395,6 +402,18 @@ def get_check_task(task_id: str) -> CheckTask:
     if not task:
         raise HTTPException(status_code=404, detail="检查任务不存在。")
     return task
+
+
+@app.delete("/api/check-tasks/{task_id}")
+def delete_check_task(task_id: str) -> dict[str, bool | str]:
+    task = state_store.get_check_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="检查任务不存在。")
+    if task.report_id:
+        state_store.delete_report(task.report_id)
+        storage.report_path(task.report_id).unlink(missing_ok=True)
+    state_store.delete_check_task(task_id)
+    return {"id": task_id, "deleted": True}
 
 
 @app.get("/api/reports/{report_id}", response_model=CheckReport)

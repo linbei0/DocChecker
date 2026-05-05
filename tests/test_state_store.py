@@ -88,3 +88,11 @@ def test_state_store_persists_records_after_reopen(tmp_path: Path) -> None:
     assert reopened.get_draft_ruleset(draft.id) == draft
     assert reopened.get_check_task(task.id) == task
     assert reopened.get_report(report.id) == report
+
+    assert reopened.delete_ruleset(ruleset.id) is True
+    assert reopened.delete_check_task(task.id) is True
+    assert reopened.delete_report(report.id) is True
+    assert reopened.delete_ruleset("missing_ruleset") is False
+    assert reopened.get_ruleset(ruleset.id) is None
+    assert reopened.get_check_task(task.id) is None
+    assert reopened.get_report(report.id) is None

@@ -9,9 +9,14 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Trash2,
   X,
 } from 'lucide-react'
-import { useRuleSetsQuery, useUpdateRuleSetMutation } from '@/features/rulesets/hooks'
+import {
+  useDeleteRuleSetMutation,
+  useRuleSetsQuery,
+  useUpdateRuleSetMutation,
+} from '@/features/rulesets/hooks'
 import { type FormatRule, type RuleSet } from '@/entities/ruleset/model'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { Button } from '@/shared/ui/Button'
@@ -21,8 +26,10 @@ export function TemplatesPage() {
   const { data: ruleSets = [], isLoading, isError, refetch } = useRuleSetsQuery()
   const [expandedRuleSetId, setExpandedRuleSetId] = useState<string | null>(null)
   const [editingRuleSetId, setEditingRuleSetId] = useState<string | null>(null)
+  const [deletingRuleSetId, setDeletingRuleSetId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
   const updateRuleSetMutation = useUpdateRuleSetMutation(editingRuleSetId || '')
+  const deleteRuleSetMutation = useDeleteRuleSetMutation()
 
   const expandedRuleSet = useMemo(
     () => ruleSets.find((ruleSet) => ruleSet.id === expandedRuleSetId) || null,
@@ -51,6 +58,19 @@ export function TemplatesPage() {
         },
       },
     )
+  }
+
+  const deleteRuleSet = (ruleSet: RuleSet) => {
+    const confirmed = window.confirm(`确定删除规则模板“${ruleSet.name}”吗？删除后不能从模板列表复用。`)
+    if (!confirmed) return
+    setDeletingRuleSetId(ruleSet.id)
+    deleteRuleSetMutation.mutate(ruleSet.id, {
+      onSuccess: () => {
+        if (expandedRuleSetId === ruleSet.id) setExpandedRuleSetId(null)
+        if (editingRuleSetId === ruleSet.id) cancelEditing()
+      },
+      onSettled: () => setDeletingRuleSetId(null),
+    })
   }
 
   return (
@@ -126,6 +146,9 @@ export function TemplatesPage() {
                   <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
                     创建时间
                   </th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-neutral-500">
+                    操作
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
@@ -140,6 +163,7 @@ export function TemplatesPage() {
                       isEditing={isEditing}
                       draftName={draftName}
                       isSaving={updateRuleSetMutation.isPending && isEditing}
+                      isDeleting={deletingRuleSetId === ruleSet.id}
                       renameError={
                         updateRuleSetMutation.isError && isEditing
                           ? updateRuleSetMutation.error.message
@@ -150,6 +174,7 @@ export function TemplatesPage() {
                       onCancelEditing={cancelEditing}
                       onDraftNameChange={setDraftName}
                       onSubmitRename={submitRename}
+                      onDelete={() => deleteRuleSet(ruleSet)}
                     />
                   )
                 })}
@@ -174,24 +199,28 @@ function TemplateRows({
   isEditing,
   draftName,
   isSaving,
+  isDeleting,
   renameError,
   onToggle,
   onStartEditing,
   onCancelEditing,
   onDraftNameChange,
   onSubmitRename,
+  onDelete,
 }: {
   ruleSet: RuleSet
   isExpanded: boolean
   isEditing: boolean
   draftName: string
   isSaving: boolean
+  isDeleting: boolean
   renameError: string | null
   onToggle: () => void
   onStartEditing: () => void
   onCancelEditing: () => void
   onDraftNameChange: (value: string) => void
   onSubmitRename: (event: FormEvent<HTMLFormElement>) => void
+  onDelete: () => void
 }) {
   return (
     <>
@@ -261,10 +290,22 @@ function TemplateRows({
         <td className="px-5 py-4 align-top text-neutral-500">
           {new Date(ruleSet.created_at).toLocaleString()}
         </td>
+        <td className="px-5 py-4 text-right align-top">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={isDeleting}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="删除规则模板"
+            title="删除规则模板"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </td>
       </tr>
       {isExpanded && (
         <tr className="hidden bg-white lg:table-row">
-          <td colSpan={6} className="border-t border-primary-100 px-5 py-5">
+          <td colSpan={7} className="border-t border-primary-100 px-5 py-5">
             <RuleDetails ruleSet={ruleSet} />
           </td>
         </tr>

@@ -97,6 +97,15 @@ class SqliteStateStore:
             ).fetchall()
         return [model_type.model_validate_json(row[0]) for row in rows]
 
+    def delete_record(self, kind: RecordKind, record_id: str) -> bool:
+        self._ensure_kind(kind)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM state_records WHERE kind = ? AND id = ?",
+                (kind, record_id),
+            )
+        return cursor.rowcount > 0
+
     def save_document(self, document: UploadedDocumentRecord) -> None:
         self.save_record("document", document.id, document)
 
@@ -118,6 +127,9 @@ class SqliteStateStore:
     def list_rulesets(self) -> list[RuleSet]:
         return self.list_records("ruleset", RuleSet)
 
+    def delete_ruleset(self, ruleset_id: str) -> bool:
+        return self.delete_record("ruleset", ruleset_id)
+
     def save_draft_ruleset(self, draft: DraftRuleSet) -> None:
         self.save_record("draft_ruleset", draft.id, draft)
 
@@ -133,11 +145,17 @@ class SqliteStateStore:
     def list_check_tasks(self) -> list[CheckTask]:
         return self.list_records("check_task", CheckTask, newest_first=True)
 
+    def delete_check_task(self, task_id: str) -> bool:
+        return self.delete_record("check_task", task_id)
+
     def save_report(self, report: CheckReport) -> None:
         self.save_record("report", report.id, report)
 
     def get_report(self, report_id: str) -> CheckReport | None:
         return self.get_record("report", report_id, CheckReport)
+
+    def delete_report(self, report_id: str) -> bool:
+        return self.delete_record("report", report_id)
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, check_same_thread=False)

@@ -1,10 +1,17 @@
 import { Link } from 'react-router'
-import { FileText, History, Plus } from 'lucide-react'
-import { useCheckTasksQuery } from '@/features/check-tasks/hooks'
+import { FileText, History, Plus, Trash2 } from 'lucide-react'
+import { useDeleteCheckTaskMutation, useCheckTasksQuery } from '@/features/check-tasks/hooks'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 
 export function HistoryPage() {
   const { data: tasks = [], isLoading, isError } = useCheckTasksQuery()
+  const deleteTaskMutation = useDeleteCheckTaskMutation()
+
+  const deleteTask = (taskId: string) => {
+    const confirmed = window.confirm('确定删除这条历史任务吗？关联报告也会从历史记录中移除。')
+    if (!confirmed) return
+    deleteTaskMutation.mutate(taskId)
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -79,6 +86,7 @@ export function HistoryPage() {
                       {new Date(task.updated_at).toLocaleString()}
                     </td>
                     <td className="px-5 py-4 text-right">
+                      <div className="flex items-center justify-end gap-3">
                       {task.report_id ? (
                         <Link to={`/reports/${task.report_id}`} className="text-primary-600 hover:underline">
                           查看报告
@@ -88,6 +96,17 @@ export function HistoryPage() {
                           查看进度
                         </Link>
                       )}
+                        <button
+                          type="button"
+                          onClick={() => deleteTask(task.id)}
+                          disabled={deleteTaskMutation.isPending}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="删除历史任务"
+                          title="删除历史任务"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

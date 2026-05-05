@@ -128,6 +128,20 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
         for item in renamed_list_response.json()
     )
 
+    delete_task_response = client.delete(f"/api/check-tasks/{task['id']}")
+    assert delete_task_response.status_code == 200
+    assert delete_task_response.json() == {"id": task["id"], "deleted": True}
+    assert client.get(f"/api/check-tasks/{task['id']}").status_code == 404
+    assert client.get(f"/api/reports/{task['report_id']}").status_code == 404
+    assert not main.storage.report_path(task["report_id"]).exists()
+
+    delete_ruleset_response = client.delete(f"/api/rulesets/{ruleset_id}")
+    assert delete_ruleset_response.status_code == 200
+    assert delete_ruleset_response.json() == {"id": ruleset_id, "deleted": True}
+    assert not any(item["id"] == ruleset_id for item in client.get("/api/rulesets").json())
+    assert client.delete(f"/api/rulesets/{ruleset_id}").status_code == 404
+    assert client.delete(f"/api/check-tasks/{task['id']}").status_code == 404
+
 
 def test_upload_document_accepts_doc_after_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "prepare_word_document", _fake_prepare_doc_upload)

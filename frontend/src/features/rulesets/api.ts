@@ -1,4 +1,5 @@
 import { apiRequest } from '@/shared/api/client'
+import { z } from 'zod'
 import {
   draftRuleSetSchema,
   ruleSetSchema,
@@ -6,6 +7,11 @@ import {
   type FormatRule,
   type RuleSet,
 } from '@/entities/ruleset/model'
+
+const deleteResponseSchema = z.object({
+  id: z.string(),
+  deleted: z.boolean(),
+})
 
 export interface CreateDraftRuleSetRequest {
   document_id: string
@@ -45,6 +51,12 @@ export async function updateRuleSet(
   return apiRequest(`/api/rulesets/${rulesetId}`, ruleSetSchema, {
     method: 'PATCH',
     body: JSON.stringify(request),
+  })
+}
+
+export async function deleteRuleSet(rulesetId: string): Promise<void> {
+  await apiRequest(`/api/rulesets/${rulesetId}`, deleteResponseSchema, {
+    method: 'DELETE',
   })
 }
 

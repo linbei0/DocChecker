@@ -3,6 +3,7 @@ import { queryKeys } from '@/shared/api/queryKeys'
 import {
   createDraftRuleSet,
   createRuleSet,
+  deleteRuleSet,
   getDraftRuleSet,
   listRuleSets,
   publishDraftRuleSet,
@@ -34,6 +35,17 @@ export function useUpdateRuleSetMutation(rulesetId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.detail(rulesetId) })
+    },
+  })
+}
+
+export function useDeleteRuleSetMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: deleteRuleSet,
+    onSuccess: (_data, rulesetId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.all })
+      void queryClient.removeQueries({ queryKey: queryKeys.rulesets.detail(rulesetId) })
     },
   })
 }
