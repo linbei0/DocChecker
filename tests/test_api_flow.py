@@ -86,6 +86,9 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     history_response = client.get("/api/check-tasks")
     assert history_response.status_code == 200
     assert any(item["id"] == task["id"] for item in history_response.json())
+    paged_history_response = client.get("/api/check-tasks?limit=1&offset=0")
+    assert paged_history_response.status_code == 200
+    assert len(paged_history_response.json()) == 1
 
     restarted_store = SqliteStateStore(main.state_store.path)
     restarted_store.initialize()
@@ -140,6 +143,9 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     assert delete_ruleset_response.status_code == 200
     assert delete_ruleset_response.json() == {"id": ruleset_id, "deleted": True}
     assert not any(item["id"] == ruleset_id for item in client.get("/api/rulesets").json())
+    paged_ruleset_response = client.get("/api/rulesets?limit=1&offset=0")
+    assert paged_ruleset_response.status_code == 200
+    assert len(paged_ruleset_response.json()) <= 1
     assert client.delete(f"/api/rulesets/{ruleset_id}").status_code == 404
     assert client.delete(f"/api/check-tasks/{task['id']}").status_code == 404
 

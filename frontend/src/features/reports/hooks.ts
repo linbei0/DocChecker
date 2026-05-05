@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { queryKeys } from '@/shared/api/queryKeys'
 import { getReport, exportReport } from './api'
 
@@ -10,10 +10,8 @@ export function useReportQuery(reportId: string) {
   })
 }
 
-export function useExportReportQuery(reportId: string) {
-  return useQuery({
-    queryKey: queryKeys.reports.export(reportId, 'markdown'),
-    queryFn: () => exportReport(reportId),
-    enabled: !!reportId,
+export function useExportReportMutation() {
+  return useMutation({
+    mutationFn: exportReport,
   })
 }

@@ -86,14 +86,20 @@ class SqliteStateStore:
         model_type: type[ModelT],
         *,
         newest_first: bool = False,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[ModelT]:
         self._ensure_kind(kind)
+        if limit < 1:
+            raise ValueError("limit 必须大于 0。")
+        if offset < 0:
+            raise ValueError("offset 不能小于 0。")
         order = "DESC" if newest_first else "ASC"
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT payload FROM state_records "
-                f"WHERE kind = ? ORDER BY created_at {order}, id {order}",
-                (kind,),
+                f"WHERE kind = ? ORDER BY created_at {order}, id {order} LIMIT ? OFFSET ?",
+                (kind, limit, offset),
             ).fetchall()
         return [model_type.model_validate_json(row[0]) for row in rows]
 
@@ -124,8 +130,8 @@ class SqliteStateStore:
     def get_ruleset(self, ruleset_id: str) -> RuleSet | None:
         return self.get_record("ruleset", ruleset_id, RuleSet)
 
-    def list_rulesets(self) -> list[RuleSet]:
-        return self.list_records("ruleset", RuleSet)
+    def list_rulesets(self, *, limit: int = 50, offset: int = 0) -> list[RuleSet]:
+        return self.list_records("ruleset", RuleSet, limit=limit, offset=offset)
 
     def delete_ruleset(self, ruleset_id: str) -> bool:
         return self.delete_record("ruleset", ruleset_id)
@@ -142,8 +148,14 @@ class SqliteStateStore:
     def get_check_task(self, task_id: str) -> CheckTask | None:
         return self.get_record("check_task", task_id, CheckTask)
 
-    def list_check_tasks(self) -> list[CheckTask]:
-        return self.list_records("check_task", CheckTask, newest_first=True)
+    def list_check_tasks(self, *, limit: int = 50, offset: int = 0) -> list[CheckTask]:
+        return self.list_records(
+            "check_task",
+            CheckTask,
+            newest_first=True,
+            limit=limit,
+            offset=offset,
+        )
 
     def delete_check_task(self, task_id: str) -> bool:
         return self.delete_record("check_task", task_id)

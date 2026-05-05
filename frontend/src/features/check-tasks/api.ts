@@ -23,8 +23,12 @@ export async function getCheckTask(taskId: string): Promise<CheckTask> {
   return apiRequest(`/api/check-tasks/${taskId}`, checkTaskSchema)
 }
 
-export async function listCheckTasks(): Promise<CheckTask[]> {
-  return apiRequest('/api/check-tasks', checkTaskSchema.array())
+export async function listCheckTasks(limit = 50, offset = 0): Promise<CheckTask[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return apiRequest(`/api/check-tasks?${params.toString()}`, checkTaskSchema.array())
 }
 
 export async function deleteCheckTask(taskId: string): Promise<void> {

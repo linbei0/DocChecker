@@ -2,6 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/shared/api/queryKeys'
 import { createCheckTask, deleteCheckTask, getCheckTask, listCheckTasks } from './api'
 
+interface CheckTaskListOptions {
+  limit?: number
+  offset?: number
+}
+
 export function useCreateCheckTaskMutation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -24,10 +29,10 @@ export function useCheckTaskQuery(taskId: string) {
   })
 }
 
-export function useCheckTasksQuery() {
+export function useCheckTasksQuery({ limit = 50, offset = 0 }: CheckTaskListOptions = {}) {
   return useQuery({
-    queryKey: queryKeys.checkTasks.all,
-    queryFn: listCheckTasks,
+    queryKey: queryKeys.checkTasks.list(limit, offset),
+    queryFn: () => listCheckTasks(limit, offset),
   })
 }
 

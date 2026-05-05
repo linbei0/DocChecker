@@ -5,6 +5,7 @@ export const queryKeys = {
   },
   rulesets: {
     all: ['rulesets'] as const,
+    list: (limit: number, offset: number) => ['rulesets', 'list', limit, offset] as const,
     detail: (id: string) => ['rulesets', id] as const,
   },
   draftRulesets: {
@@ -13,6 +14,7 @@ export const queryKeys = {
   },
   checkTasks: {
     all: ['check-tasks'] as const,
+    list: (limit: number, offset: number) => ['check-tasks', 'list', limit, offset] as const,
     detail: (id: string) => ['check-tasks', id] as const,
   },
   reports: {

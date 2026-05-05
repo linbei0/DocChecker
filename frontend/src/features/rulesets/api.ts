@@ -39,9 +39,13 @@ export async function createRuleSet(ruleset: RuleSet): Promise<RuleSet> {
   })
 }
 
-export async function listRuleSets(): Promise<RuleSet[]> {
+export async function listRuleSets(limit = 50, offset = 0): Promise<RuleSet[]> {
   const schema = ruleSetSchema.array()
-  return apiRequest('/api/rulesets', schema)
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return apiRequest(`/api/rulesets?${params.toString()}`, schema)
 }
 
 export async function updateRuleSet(

@@ -1,11 +1,20 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { FileText, History, Plus, Trash2 } from 'lucide-react'
+import { Button } from '@/shared/ui/Button'
 import { useDeleteCheckTaskMutation, useCheckTasksQuery } from '@/features/check-tasks/hooks'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 
+const PAGE_SIZE = 20
+
 export function HistoryPage() {
-  const { data: tasks = [], isLoading, isError } = useCheckTasksQuery()
+  const [offset, setOffset] = useState(0)
+  const { data: tasks = [], isLoading, isError } = useCheckTasksQuery({
+    limit: PAGE_SIZE,
+    offset,
+  })
   const deleteTaskMutation = useDeleteCheckTaskMutation()
+  const page = Math.floor(offset / PAGE_SIZE) + 1
 
   const deleteTask = (taskId: string) => {
     const confirmed = window.confirm('确定删除这条历史任务吗？关联报告也会从历史记录中移除。')
@@ -43,7 +52,8 @@ export function HistoryPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-neutral-50">
                 <tr>
@@ -112,7 +122,29 @@ export function HistoryPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+            <div className="flex items-center justify-between border-t border-neutral-200 px-5 py-4">
+              <p className="text-xs text-neutral-500">第 {page} 页，每页 {PAGE_SIZE} 条</p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOffset((prev) => Math.max(0, prev - PAGE_SIZE))}
+                  disabled={offset === 0}
+                >
+                  上一页
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOffset((prev) => prev + PAGE_SIZE)}
+                  disabled={tasks.length < PAGE_SIZE}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </section>
     </div>

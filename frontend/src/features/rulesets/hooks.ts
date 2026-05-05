@@ -11,10 +11,15 @@ import {
   updateDraftRuleSet,
 } from './api'
 
-export function useRuleSetsQuery() {
+interface RuleSetListOptions {
+  limit?: number
+  offset?: number
+}
+
+export function useRuleSetsQuery({ limit = 50, offset = 0 }: RuleSetListOptions = {}) {
   return useQuery({
-    queryKey: queryKeys.rulesets.all,
-    queryFn: listRuleSets,
+    queryKey: queryKeys.rulesets.list(limit, offset),
+    queryFn: () => listRuleSets(limit, offset),
   })
 }
 

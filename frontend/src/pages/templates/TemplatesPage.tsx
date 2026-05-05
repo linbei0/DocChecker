@@ -22,14 +22,21 @@ import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { Button } from '@/shared/ui/Button'
 import { cn } from '@/shared/lib/utils'
 
+const PAGE_SIZE = 20
+
 export function TemplatesPage() {
-  const { data: ruleSets = [], isLoading, isError, refetch } = useRuleSetsQuery()
+  const [offset, setOffset] = useState(0)
+  const { data: ruleSets = [], isLoading, isError, refetch } = useRuleSetsQuery({
+    limit: PAGE_SIZE,
+    offset,
+  })
   const [expandedRuleSetId, setExpandedRuleSetId] = useState<string | null>(null)
   const [editingRuleSetId, setEditingRuleSetId] = useState<string | null>(null)
   const [deletingRuleSetId, setDeletingRuleSetId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
   const updateRuleSetMutation = useUpdateRuleSetMutation(editingRuleSetId || '')
   const deleteRuleSetMutation = useDeleteRuleSetMutation()
+  const page = Math.floor(offset / PAGE_SIZE) + 1
 
   const expandedRuleSet = useMemo(
     () => ruleSets.find((ruleSet) => ruleSet.id === expandedRuleSetId) || null,
@@ -124,8 +131,9 @@ export function TemplatesPage() {
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
               <thead className="bg-neutral-50">
                 <tr>
                   <th className="w-12 px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-neutral-500">
@@ -151,36 +159,58 @@ export function TemplatesPage() {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-200">
-                {ruleSets.map((ruleSet) => {
-                  const isExpanded = expandedRuleSetId === ruleSet.id
-                  const isEditing = editingRuleSetId === ruleSet.id
-                  return (
-                    <TemplateRows
-                      key={ruleSet.id}
-                      ruleSet={ruleSet}
-                      isExpanded={isExpanded}
-                      isEditing={isEditing}
-                      draftName={draftName}
-                      isSaving={updateRuleSetMutation.isPending && isEditing}
-                      isDeleting={deletingRuleSetId === ruleSet.id}
-                      renameError={
-                        updateRuleSetMutation.isError && isEditing
-                          ? updateRuleSetMutation.error.message
-                          : null
-                      }
-                      onToggle={() => setExpandedRuleSetId(isExpanded ? null : ruleSet.id)}
-                      onStartEditing={() => startEditing(ruleSet)}
-                      onCancelEditing={cancelEditing}
-                      onDraftNameChange={setDraftName}
-                      onSubmitRename={submitRename}
-                      onDelete={() => deleteRuleSet(ruleSet)}
-                    />
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                <tbody className="divide-y divide-neutral-200">
+                  {ruleSets.map((ruleSet) => {
+                    const isExpanded = expandedRuleSetId === ruleSet.id
+                    const isEditing = editingRuleSetId === ruleSet.id
+                    return (
+                      <TemplateRows
+                        key={ruleSet.id}
+                        ruleSet={ruleSet}
+                        isExpanded={isExpanded}
+                        isEditing={isEditing}
+                        draftName={draftName}
+                        isSaving={updateRuleSetMutation.isPending && isEditing}
+                        isDeleting={deletingRuleSetId === ruleSet.id}
+                        renameError={
+                          updateRuleSetMutation.isError && isEditing
+                            ? updateRuleSetMutation.error.message
+                            : null
+                        }
+                        onToggle={() => setExpandedRuleSetId(isExpanded ? null : ruleSet.id)}
+                        onStartEditing={() => startEditing(ruleSet)}
+                        onCancelEditing={cancelEditing}
+                        onDraftNameChange={setDraftName}
+                        onSubmitRename={submitRename}
+                        onDelete={() => deleteRuleSet(ruleSet)}
+                      />
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-neutral-200 px-5 py-4">
+              <p className="text-xs text-neutral-500">第 {page} 页，每页 {PAGE_SIZE} 条</p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOffset((prev) => Math.max(0, prev - PAGE_SIZE))}
+                  disabled={offset === 0}
+                >
+                  上一页
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setOffset((prev) => prev + PAGE_SIZE)}
+                  disabled={ruleSets.length < PAGE_SIZE}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </section>
 

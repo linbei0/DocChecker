@@ -96,3 +96,40 @@ def test_state_store_persists_records_after_reopen(tmp_path: Path) -> None:
     assert reopened.get_ruleset(ruleset.id) is None
     assert reopened.get_check_task(task.id) is None
     assert reopened.get_report(report.id) is None
+
+
+def test_state_store_lists_records_with_limit_and_offset(tmp_path: Path) -> None:
+    store = SqliteStateStore(tmp_path / "state.sqlite3")
+    store.initialize()
+    rulesets = [
+        RuleSet(
+            id=f"ruleset_{index}",
+            name=f"规则集 {index}",
+            source_type=SourceType.manual,
+            version="1.0.0",
+            rules=[],
+            created_at=f"2026-05-03T00:00:0{index}+00:00",
+        )
+        for index in range(3)
+    ]
+    tasks = [
+        CheckTask(
+            id=f"task_{index}",
+            document_id="doc_1",
+            ruleset_id="ruleset_1",
+            status=TaskStatus.succeeded,
+            created_at=f"2026-05-03T00:00:0{index}+00:00",
+            updated_at=f"2026-05-03T00:00:0{index}+00:00",
+        )
+        for index in range(3)
+    ]
+    store.save_many(
+        [("ruleset", ruleset.id, ruleset) for ruleset in rulesets]
+        + [("check_task", task.id, task) for task in tasks]
+    )
+
+    assert [item.id for item in store.list_rulesets(limit=2, offset=1)] == [
+        "ruleset_1",
+        "ruleset_2",
+    ]
+    assert [item.id for item in store.list_check_tasks(limit=2)] == ["task_2", "task_1"]

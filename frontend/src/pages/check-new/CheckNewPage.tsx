@@ -42,7 +42,7 @@ export function CheckNewPage() {
   const uploadMutation = useUploadDocumentMutation()
   const uploadRequirementMutation = useUploadRequirementDocumentMutation()
   const createDraftMutation = useCreateDraftRuleSetMutation()
-  const { data: templates = [], isLoading: isLoadingTemplates } = useRuleSetsQuery()
+  const { data: templates = [], isLoading: isLoadingTemplates } = useRuleSetsQuery({ limit: 100 })
 
   const canCreateDraft = useMemo(() => {
     if (!uploadedFile || !sourceType) return false

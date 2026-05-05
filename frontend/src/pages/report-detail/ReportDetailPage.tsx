@@ -12,7 +12,7 @@ import {
   ListChecks,
 } from 'lucide-react'
 import { Button } from '@/shared/ui/Button'
-import { useReportQuery, useExportReportQuery } from '@/features/reports/hooks'
+import { useReportQuery, useExportReportMutation } from '@/features/reports/hooks'
 import { cn } from '@/shared/lib/utils'
 import {
   categoryLabel,
@@ -44,13 +44,30 @@ const categoryFilters: Array<{ key: CategoryFilter; label: string }> = [
   { key: 'abstract', label: '摘要' },
 ]
 
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches,
+  )
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(query)
+    setMatches(mediaQuery.matches)
+    const handleChange = (event: MediaQueryListEvent) => setMatches(event.matches)
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [query])
+
+  return matches
+}
+
 export function ReportDetailPage() {
   const { reportId } = useParams<{ reportId: string }>()
   const [activeSeverity, setActiveSeverity] = useState<SeverityFilter>('all')
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>('all')
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
 
   const { data: report, isLoading } = useReportQuery(reportId || '')
-  const { data: exportData } = useExportReportQuery(reportId || '')
+  const exportReportMutation = useExportReportMutation()
 
   const summary = useMemo(() => {
     if (!report) return { total: 0, major: 0, minor: 0, info: 0 }
@@ -84,8 +101,9 @@ export function ReportDetailPage() {
   const findingGroups = useMemo(() => groupFindingsByFragment(filteredFindings), [filteredFindings])
   const fragmentSections = useMemo(() => buildFragmentSections(findingGroups), [findingGroups])
 
-  const handleExport = () => {
-    if (!exportData?.content) return
+  const handleExport = async () => {
+    if (!reportId) return
+    const exportData = await exportReportMutation.mutateAsync(reportId)
     const blob = new Blob([exportData.content], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -130,7 +148,11 @@ export function ReportDetailPage() {
             <p className="mt-1 text-sm text-neutral-500">{report.document_id}</p>
           </div>
         </div>
-        <Button variant="secondary" onClick={handleExport}>
+        <Button
+          variant="secondary"
+          onClick={() => void handleExport()}
+          isLoading={exportReportMutation.isPending}
+        >
           <Download className="mr-1 h-4 w-4" />
           导出 Markdown
         </Button>
@@ -209,7 +231,7 @@ export function ReportDetailPage() {
             ) : (
               <div className="space-y-11 px-6 py-8">
                 {fragmentSections.map((section) => (
-                  <ProblemSection key={section.id} section={section} />
+                  <ProblemSection key={section.id} section={section} isDesktop={isDesktop} />
                 ))}
               </div>
             )}
@@ -419,7 +441,13 @@ function fragmentSectionTitle(group: FindingGroup) {
   return first.location.section_name || first.location.section_path || categoryLabel(first.category)
 }
 
-function ProblemSection({ section }: { section: FragmentSection }) {
+function ProblemSection({
+  section,
+  isDesktop,
+}: {
+  section: FragmentSection
+  isDesktop: boolean
+}) {
   return (
     <article id={`fragment-section-${section.groups[0]?.anchorIndex ?? 0}`}>
       <div className="mb-5 flex items-center justify-between gap-4">
@@ -435,68 +463,70 @@ function ProblemSection({ section }: { section: FragmentSection }) {
       </div>
 
       <div className="overflow-hidden border border-neutral-200">
-        <table className="hidden w-full table-fixed border-collapse text-sm lg:table">
-          <colgroup>
-            <col className="w-20" />
-            <col className="w-[22%]" />
-            <col className="w-[20%]" />
-            <col className="w-[25%]" />
-            <col />
-          </colgroup>
-          <thead className="bg-[#dfe8f1] text-left text-neutral-950">
-            <tr>
-              <th className="px-5 py-3 font-semibold">序号</th>
-              <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">原文片段</th>
-              <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">问题详情</th>
-              <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">原文问题描述</th>
-              <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">规范</th>
-            </tr>
-          </thead>
-          <tbody>
-            {section.groups.map((group) =>
-              group.findings.map((finding, issueIndex) => (
-                <tr
-                  key={finding.id}
-                  className={cn(
-                    'border-t border-neutral-200',
-                    group.displayIndex % 2 === 0 && 'bg-neutral-50',
-                  )}
-                >
-                  {issueIndex === 0 && (
-                    <>
-                      <td rowSpan={group.findings.length} className="px-5 py-4 text-center align-middle">
-                        {group.displayIndex}
-                      </td>
-                      <td
-                        rowSpan={group.findings.length}
-                        className="border-l border-neutral-200 px-5 py-4 align-middle text-neutral-900"
-                      >
-                        <Tooltip content={group.excerpt}>
-                          <span className="line-clamp-4">{group.excerpt}</span>
-                        </Tooltip>
-                      </td>
-                    </>
-                  )}
-                  <td className="border-l border-neutral-200 px-5 py-3 align-top">
-                    <IssueDetail finding={finding} />
-                  </td>
-                  <td className="border-l border-neutral-200 px-5 py-3 align-top text-neutral-800">
-                    <span className="line-clamp-2">{formatFindingValue(finding.actual)}</span>
-                  </td>
-                  <td className="border-l border-neutral-200 px-5 py-3 align-top text-primary-700">
-                    <span className="line-clamp-2">{formatFindingValue(finding.expected)}</span>
-                  </td>
-                </tr>
-              )),
-            )}
-          </tbody>
-        </table>
-
-        <div className="divide-y divide-neutral-200 lg:hidden">
-          {section.groups.map((group) => (
-            <MobileFragmentCard key={group.id} group={group} />
-          ))}
-        </div>
+        {isDesktop ? (
+          <table className="w-full table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-20" />
+              <col className="w-[22%]" />
+              <col className="w-[20%]" />
+              <col className="w-[25%]" />
+              <col />
+            </colgroup>
+            <thead className="bg-[#dfe8f1] text-left text-neutral-950">
+              <tr>
+                <th className="px-5 py-3 font-semibold">序号</th>
+                <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">原文片段</th>
+                <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">问题详情</th>
+                <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">原文问题描述</th>
+                <th className="border-l border-[#d2dde8] px-5 py-3 font-semibold">规范</th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.groups.map((group) =>
+                group.findings.map((finding, issueIndex) => (
+                  <tr
+                    key={finding.id}
+                    className={cn(
+                      'border-t border-neutral-200',
+                      group.displayIndex % 2 === 0 && 'bg-neutral-50',
+                    )}
+                  >
+                    {issueIndex === 0 && (
+                      <>
+                        <td rowSpan={group.findings.length} className="px-5 py-4 text-center align-middle">
+                          {group.displayIndex}
+                        </td>
+                        <td
+                          rowSpan={group.findings.length}
+                          className="border-l border-neutral-200 px-5 py-4 align-middle text-neutral-900"
+                        >
+                          <Tooltip content={group.excerpt}>
+                            <span className="line-clamp-4">{group.excerpt}</span>
+                          </Tooltip>
+                        </td>
+                      </>
+                    )}
+                    <td className="border-l border-neutral-200 px-5 py-3 align-top">
+                      <IssueDetail finding={finding} />
+                    </td>
+                    <td className="border-l border-neutral-200 px-5 py-3 align-top text-neutral-800">
+                      <span className="line-clamp-2">{formatFindingValue(finding.actual)}</span>
+                    </td>
+                    <td className="border-l border-neutral-200 px-5 py-3 align-top text-primary-700">
+                      <span className="line-clamp-2">{formatFindingValue(finding.expected)}</span>
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        ) : (
+          <div className="divide-y divide-neutral-200">
+            {section.groups.map((group) => (
+              <MobileFragmentCard key={group.id} group={group} />
+            ))}
+          </div>
+        )}
       </div>
     </article>
   )

@@ -7,6 +7,7 @@ from docchecker.checkers.finding_context import (
     paragraph_excerpt,
     paragraph_location,
 )
+from docchecker.checkers.paragraph_index import ParagraphMatchIndex
 from docchecker.domain.document import DocumentModel, ParagraphNode
 from docchecker.domain.enums import Certainty, RuleCategory
 from docchecker.domain.findings import CheckFinding
@@ -19,8 +20,9 @@ class ParagraphChecker:
 
     def check(self, document: DocumentModel, rules: list[FormatRule]) -> list[CheckFinding]:
         findings: list[CheckFinding] = []
+        paragraph_index = ParagraphMatchIndex(document)
         for rule in relevant_rules(rules, self.supported_categories):
-            for paragraph in _matching_paragraphs(document, rule):
+            for paragraph in paragraph_index.match_paragraph_rule(rule):
                 for field, expected in rule.expectation.items():
                     actual = _actual_value(paragraph, field, expected, rule.target.scope)
                     if actual is None:

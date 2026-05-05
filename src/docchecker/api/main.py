@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from docchecker.core.config import get_settings
@@ -200,8 +200,11 @@ def create_ruleset(ruleset: RuleSet) -> RuleSet:
 
 
 @app.get("/api/rulesets", response_model=list[RuleSet])
-def list_rulesets() -> list[RuleSet]:
-    return state_store.list_rulesets()
+def list_rulesets(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> list[RuleSet]:
+    return state_store.list_rulesets(limit=limit, offset=offset)
 
 
 @app.patch("/api/rulesets/{ruleset_id}", response_model=RuleSet)
@@ -404,8 +407,11 @@ def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
 
 
 @app.get("/api/check-tasks", response_model=list[CheckTask])
-def list_check_tasks() -> list[CheckTask]:
-    return state_store.list_check_tasks()
+def list_check_tasks(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> list[CheckTask]:
+    return state_store.list_check_tasks(limit=limit, offset=offset)
 
 
 @app.get("/api/check-tasks/{task_id}", response_model=CheckTask)
