@@ -471,6 +471,26 @@ def test_engine_reports_font_mismatch(tmp_path: Path) -> None:
     assert findings[0].context["field_label"] == "中文字体"
 
 
+def test_engine_logs_checker_failure(caplog: pytest.LogCaptureFixture) -> None:
+    class FailingChecker:
+        checker_id = "failing"
+
+        def check(self, document, rules):
+            raise RuntimeError("checker boom")
+
+    caplog.set_level("ERROR", logger="docchecker.checkers.engine")
+
+    findings = CheckEngine(checkers=[FailingChecker()]).run(object(), [])
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "__checker_execution__"
+    assert findings[0].actual == {"error": "checker boom"}
+    assert any(
+        record.exc_info and "检查器 failing 执行失败" in record.message
+        for record in caplog.records
+    )
+
+
 def test_heading_rules_do_not_match_body_text_mentions(tmp_path: Path) -> None:
     path = tmp_path / "heading-selector.docx"
     document = Document()

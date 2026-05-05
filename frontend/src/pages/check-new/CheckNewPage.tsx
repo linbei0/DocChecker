@@ -222,11 +222,12 @@ export function CheckNewPage() {
                   {sourceType === 'requirement_doc' && (
                     <div className="mt-4">
                       {!requirementDocument ? (
-                        <label className="block rounded-xl border border-dashed border-neutral-300 p-6 text-center transition hover:border-primary-400">
+                        <label className="relative block rounded-xl border border-dashed border-neutral-300 p-6 text-center transition hover:border-primary-400 focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/20">
                           <input
                             type="file"
                             accept={WORD_FILE_ACCEPT}
-                            className="hidden"
+                            aria-label="上传格式要求文档"
+                            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                             onChange={(event) => {
                               const file = event.target.files?.[0]
                               if (file) void handleRequirementFile(file)
@@ -404,13 +405,14 @@ function FileDropzone({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'relative rounded-xl border-2 border-dashed p-12 text-center transition-colors',
+        'relative rounded-xl border-2 border-dashed p-12 text-center transition-colors focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/20',
         isDragging ? 'border-primary-500 bg-primary-50' : 'border-neutral-300 hover:border-neutral-400',
       )}
     >
       <input
         type="file"
         accept={WORD_FILE_ACCEPT}
+        aria-label={title}
         onChange={onChange}
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       />
@@ -438,7 +440,13 @@ function SelectedFile({
         <p className="truncate text-sm font-medium text-neutral-900">{filename}</p>
         <p className="text-xs text-neutral-500">{formatFileSize(sizeBytes)}</p>
       </div>
-      <button onClick={onRemove} className="rounded-md p-1 text-neutral-400 hover:bg-neutral-200">
+      <button
+        type="button"
+        onClick={onRemove}
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-200"
+        aria-label={`移除文件：${filename}`}
+        title="移除文件"
+      >
         <X className="h-4 w-4" />
       </button>
     </div>

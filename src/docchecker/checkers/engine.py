@@ -1,3 +1,5 @@
+import logging
+
 from docchecker.checkers.base import Checker
 from docchecker.checkers.font import FontChecker
 from docchecker.checkers.header_footer import HeaderFooterChecker
@@ -15,6 +17,8 @@ from docchecker.checkers.semantic import (
 from docchecker.domain.document import DocumentModel
 from docchecker.domain.findings import CheckFinding, FindingLocation
 from docchecker.domain.rules import FormatRule
+
+logger = logging.getLogger(__name__)
 
 
 class CheckExecutionError(RuntimeError):
@@ -43,6 +47,7 @@ class CheckEngine:
             try:
                 findings.extend(checker.check(document, rules))
             except Exception as exc:
+                logger.exception("检查器 %s 执行失败。", checker.checker_id)
                 findings.append(
                     CheckFinding(
                         id=f"{checker.checker_id}:checker_failed",

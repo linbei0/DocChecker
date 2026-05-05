@@ -386,12 +386,20 @@ def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
     succeeded = task.model_copy(
         update={"status": TaskStatus.succeeded, "report_id": report.id, "updated_at": _now()}
     )
-    state_store.save_many(
-        [
-            ("report", report.id, report),
-            ("check_task", task.id, succeeded),
-        ]
-    )
+    try:
+        state_store.save_many(
+            [
+                ("report", report.id, report),
+                ("check_task", task.id, succeeded),
+            ]
+        )
+    except Exception as exc:
+        storage.report_path(report.id).unlink(missing_ok=True)
+        failed = task.model_copy(
+            update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
+        )
+        state_store.save_check_task(failed)
+        return failed
     return succeeded
 
 

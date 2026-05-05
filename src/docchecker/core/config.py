@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     task_execution_mode: Literal["inline", "rq"] = "inline"
     redis_url: str = "redis://localhost:6379/0"
+
+    @model_validator(mode="after")
+    def validate_task_execution_mode(self) -> "Settings":
+        if self.task_execution_mode == "rq":
+            raise ValueError("DOC_CHECKER_TASK_EXECUTION_MODE=rq 已预留但尚未实现，请使用 inline。")
+        return self
 
 
 @lru_cache

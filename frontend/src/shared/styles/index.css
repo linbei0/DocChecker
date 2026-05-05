@@ -122,7 +122,8 @@ body {
 /* ─── Focus styles ─── */
 
 :focus-visible {
-  outline: none;
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 
 /* ─── Line clamp utilities (fallback) ─── */

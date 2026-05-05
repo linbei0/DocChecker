@@ -236,3 +236,57 @@ def test_upload_document_rejects_oversized_file_during_stream(
     assert document_response.status_code == 400
     assert "超过限制" in document_response.json()["detail"]
     assert list(main.storage.documents_dir.iterdir()) == []
+
+
+def test_check_task_marks_failed_and_cleans_report_when_final_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docx_path = tmp_path / "paper.docx"
+    _create_docx(docx_path, "正文内容")
+    client = TestClient(app)
+
+    with docx_path.open("rb") as file:
+        document_response = client.post(
+            "/api/documents",
+            files={
+                "file": (
+                    "paper.docx",
+                    file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+    assert document_response.status_code == 200
+    document_id = document_response.json()["document_id"]
+
+    ruleset_id = "ruleset_finalize_fail"
+    ruleset_response = client.post(
+        "/api/rulesets",
+        json={
+            "id": ruleset_id,
+            "name": "空规则集",
+            "source_type": "manual",
+            "version": "1.0.0",
+            "created_at": "2026-04-26T00:00:00+08:00",
+            "rules": [],
+        },
+    )
+    assert ruleset_response.status_code == 200
+
+    def fail_save_many(records) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(main.state_store, "save_many", fail_save_many)
+    task_response = client.post(
+        "/api/check-tasks",
+        json={"document_id": document_id, "ruleset_id": ruleset_id},
+    )
+
+    assert task_response.status_code == 200
+    task = task_response.json()
+    assert task["status"] == "failed"
+    assert task["error"] == "database unavailable"
+    assert list(main.storage.reports_dir.iterdir()) == []
+    persisted_task = client.get(f"/api/check-tasks/{task['id']}").json()
+    assert persisted_task["status"] == "failed"

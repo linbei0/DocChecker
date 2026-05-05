@@ -658,7 +658,7 @@ function FeedbackGroupCard({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-2xl border p-4 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md',
+        'rounded-2xl border p-4 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary-500/30',
         tone,
         active && 'ring-2 ring-primary-400/30',
       )}
@@ -692,7 +692,7 @@ function FilterPill({
     <button
       onClick={onClick}
       className={cn(
-        'inline-flex items-center rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-200',
+        'inline-flex items-center rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-primary-500/30',
         active
           ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm'
           : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50',
@@ -714,15 +714,19 @@ function FilterPill({
 function ToggleSwitch({
   enabled,
   onToggle,
+  label,
 }: {
   enabled: boolean
   onToggle: () => void
+  label: string
 }) {
   return (
     <button
+      type="button"
       onClick={onToggle}
       role="switch"
       aria-checked={enabled}
+      aria-label={label}
       className={cn(
         'relative inline-flex h-[22px] w-10 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2',
         enabled ? 'bg-primary-600' : 'bg-neutral-300',
@@ -871,7 +875,13 @@ function RuleRow({
         )}
       >
         <td className="px-4 py-3.5 sm:px-6">
-          <ToggleSwitch enabled={isEnabled} onToggle={onToggle} />
+          <ToggleSwitch
+            enabled={isEnabled}
+            onToggle={onToggle}
+            label={`${isEnabled ? '禁用' : '启用'}规则：${rule.category}，${
+              rule.target.selector || rule.target.scope
+            }`}
+          />
         </td>
         <td className="px-4 py-3.5 text-sm font-medium text-neutral-900 sm:px-6">
           {rule.category}
