@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import {
   AlertCircle,
@@ -47,6 +47,15 @@ type UnsupportedReviewItem = {
 
 type ReviewItem = RuleReviewItem | UnsupportedReviewItem
 type EditableValueKind = 'string' | 'number' | 'boolean' | 'list' | 'json'
+
+type ReviewGroup = {
+  id: string
+  title: string
+  subtitle: string
+  items: ReviewItem[]
+  enabledCount: number
+  totalRuleCount: number
+}
 
 type ExpectationDraftField = {
   key: string
@@ -307,6 +316,7 @@ export function RuleConfirmPage() {
   const visibleRules = visibleItems
     .filter((item): item is RuleReviewItem => item.kind === 'rule')
     .map((item) => item.rule)
+  const visibleGroups = buildReviewGroups(visibleItems)
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -513,7 +523,7 @@ export function RuleConfirmPage() {
                 </th>
               </tr>
             </thead>
-            {visibleItems.length === 0 ? (
+            {visibleGroups.length === 0 ? (
               <tbody>
                 <tr>
                   <td colSpan={7} className="px-6 py-16 text-center">
@@ -527,39 +537,48 @@ export function RuleConfirmPage() {
                 </tr>
               </tbody>
             ) : (
-              visibleItems.map((item) =>
-                item.kind === 'rule' ? (
-                  <RuleRow
-                    key={item.id}
-                    rule={item.rule}
-                    expanded={expandedItemId === item.id}
-                    editing={editingRuleId === item.rule.id}
-                    expectationDraft={expectationDraft}
-                    onToggle={() => toggleRule(item.rule.id)}
-                    onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
-                    onEdit={() => startEditing(item.rule)}
-                    onCancelEdit={() => setEditingRuleId(null)}
-                    onSaveEdit={() => saveRuleEdit(item.rule.id)}
-                    onDraftFieldChange={updateExpectationDraftField}
-                    onAddDraftField={addExpectationDraftField}
-                    onRemoveDraftField={removeExpectationDraftField}
-                    onSeverityChange={(severity) =>
-                      setRules((prev) =>
-                        prev.map((rule) =>
-                          rule.id === item.rule.id ? { ...rule, severity } : rule,
-                        ),
-                      )
-                    }
-                  />
-                ) : (
-                  <UnsupportedRow
-                    key={item.id}
-                    requirement={item.requirement}
-                    expanded={expandedItemId === item.id}
-                    onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
-                  />
-                ),
-              )
+              visibleGroups.map((group) => (
+                <Fragment key={group.id}>
+                  <RuleGroupHeader group={group} />
+                  {group.items.map((item) =>
+                    item.kind === 'rule' ? (
+                      <RuleRow
+                        key={item.id}
+                        rule={item.rule}
+                        expanded={expandedItemId === item.id}
+                        editing={editingRuleId === item.rule.id}
+                        expectationDraft={expectationDraft}
+                        onToggle={() => toggleRule(item.rule.id)}
+                        onExpand={() =>
+                          setExpandedItemId(expandedItemId === item.id ? null : item.id)
+                        }
+                        onEdit={() => startEditing(item.rule)}
+                        onCancelEdit={() => setEditingRuleId(null)}
+                        onSaveEdit={() => saveRuleEdit(item.rule.id)}
+                        onDraftFieldChange={updateExpectationDraftField}
+                        onAddDraftField={addExpectationDraftField}
+                        onRemoveDraftField={removeExpectationDraftField}
+                        onSeverityChange={(severity) =>
+                          setRules((prev) =>
+                            prev.map((rule) =>
+                              rule.id === item.rule.id ? { ...rule, severity } : rule,
+                            ),
+                          )
+                        }
+                      />
+                    ) : (
+                      <UnsupportedRow
+                        key={item.id}
+                        requirement={item.requirement}
+                        expanded={expandedItemId === item.id}
+                        onExpand={() =>
+                          setExpandedItemId(expandedItemId === item.id ? null : item.id)
+                        }
+                      />
+                    ),
+                  )}
+                </Fragment>
+              ))
             )}
           </table>
         </div>
@@ -617,6 +636,83 @@ function buildReviewItems(
       ),
   )
   return [...ruleItems, ...unsupportedItems]
+}
+
+function buildReviewGroups(items: ReviewItem[]): ReviewGroup[] {
+  const groups = new Map<string, ReviewGroup>()
+  for (const item of items) {
+    const key = reviewGroupKey(item)
+    const existing = groups.get(key)
+    if (existing) {
+      existing.items.push(item)
+      if (item.kind === 'rule') {
+        existing.totalRuleCount += 1
+        if (item.rule.enabled !== false) existing.enabledCount += 1
+      }
+      continue
+    }
+    groups.set(key, {
+      id: key,
+      title: reviewGroupTitle(item),
+      subtitle: reviewGroupSubtitle(item),
+      items: [item],
+      enabledCount: item.kind === 'rule' && item.rule.enabled !== false ? 1 : 0,
+      totalRuleCount: item.kind === 'rule' ? 1 : 0,
+    })
+  }
+  return [...groups.values()]
+}
+
+function reviewGroupKey(item: ReviewItem): string {
+  if (item.kind === 'unsupported') {
+    return `unsupported:${item.requirement.target_scope || item.requirement.category}`
+  }
+  const scope = normalizedRuleScope(item.rule)
+  return `rule:${scope}`
+}
+
+function reviewGroupTitle(item: ReviewItem): string {
+  if (item.kind === 'unsupported') {
+    return targetScopeLabel(item.requirement.target_scope || item.requirement.category)
+  }
+  return targetScopeLabel(normalizedRuleScope(item.rule))
+}
+
+function reviewGroupSubtitle(item: ReviewItem): string {
+  if (item.kind === 'unsupported') {
+    return '暂不支持或需补充能力的规范要求'
+  }
+  const rule = item.rule
+  return [categoryLabel(rule.category), rule.target.selector]
+    .filter(Boolean)
+    .join(' / ')
+}
+
+function normalizedRuleScope(rule: FormatRule): string {
+  if (rule.target.scope === 'document' && isBodySelector(rule.target.selector)) {
+    return 'body.paragraph'
+  }
+  if (rule.target.scope === 'paragraph' && isBodySelector(rule.target.selector)) {
+    return 'body.paragraph'
+  }
+  if (rule.target.scope.startsWith('heading.')) return rule.target.scope
+  if (rule.target.scope === 'heading' && rule.target.selector) {
+    const level = headingSelectorLevel(rule.target.selector)
+    if (level) return `heading.${level}`
+  }
+  return rule.target.scope
+}
+
+function isBodySelector(selector?: string | null) {
+  return ['正文', '正文段落', 'body', 'body.paragraph'].includes(selector || '')
+}
+
+function headingSelectorLevel(selector: string) {
+  if (selector.includes('一级标题') || selector === 'Heading 1') return 1
+  if (selector.includes('二级标题') || selector === 'Heading 2') return 2
+  if (selector.includes('三级标题') || selector === 'Heading 3') return 3
+  const match = selector.match(/Heading\s*([1-6])/i)
+  return match ? Number(match[1]) : null
 }
 
 function dedupeBy<T>(items: T[], keyOf: (item: T) => string): T[] {
@@ -775,6 +871,47 @@ function FeedbackGroupCard({
       </div>
       <p className="mt-3 text-xs leading-relaxed text-neutral-600">{group.nextAction}</p>
     </button>
+  )
+}
+
+function RuleGroupHeader({ group }: { group: ReviewGroup }) {
+  const categories = Array.from(
+    new Set(
+      group.items.map((item) =>
+        item.kind === 'rule' ? categoryLabel(item.rule.category) : categoryLabel(item.requirement.category),
+      ),
+    ),
+  )
+  const statusText =
+    group.totalRuleCount > 0
+      ? `${group.enabledCount}/${group.totalRuleCount} 已启用`
+      : `${group.items.length} 条待处理`
+
+  return (
+    <tbody>
+      <tr className="border-y border-neutral-200 bg-neutral-100/70">
+        <td colSpan={7} className="px-4 py-3 sm:px-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-neutral-900">{group.title}</span>
+                <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500 ring-1 ring-neutral-200">
+                  {group.items.length} 条规则
+                </span>
+                <span className="rounded-full bg-primary-50 px-2.5 py-1 text-[11px] font-medium text-primary-700 ring-1 ring-primary-100">
+                  {statusText}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                {group.subtitle}
+                {categories.length > 0 && ` · ${categories.join('、')}`}
+              </p>
+            </div>
+            <p className="text-xs text-neutral-500">同一适用范围的字体、段落和标题要求已合并展示</p>
+          </div>
+        </td>
+      </tr>
+    </tbody>
   )
 }
 
@@ -1529,6 +1666,18 @@ const TARGET_SCOPE_LABELS: Record<string, string> = {
   paragraph: '段落',
   'body.paragraph': '正文段落',
   heading: '标题',
+  'heading.1': '一级标题',
+  'heading.2': '二级标题',
+  'heading.3': '三级标题',
+  'heading.4': '四级标题',
+  'heading.5': '五级标题',
+  'heading.6': '六级标题',
+  'cover.title': '论文题目',
+  'abstract.paragraph': '摘要段落',
+  'keywords.paragraph': '关键词段落',
+  table_cell: '表格单元格',
+  'table.cell': '表格单元格',
+  'table.paragraph': '表格段落',
   table: '表格',
   header_footer: '页眉页脚',
   caption: '图表题注',
