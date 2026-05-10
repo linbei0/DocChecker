@@ -61,6 +61,7 @@ def compile_rule_candidates(
 ) -> RuleCompilationResult:
     result = RuleCompilationResult()
     for candidate in candidates:
+        target_scope, selector = _normalized_target(candidate)
         if candidate.checkability == "unsupported":
             result.unsupported_candidate_count += 1
             result.issues.append(
@@ -83,7 +84,7 @@ def compile_rule_candidates(
 
         if not uses_execution_backend and not supports_scope(
             candidate.category,
-            scope=candidate.target_scope,
+            scope=target_scope,
         ):
             result.unsupported_candidate_count += 1
             result.issues.append(
@@ -93,7 +94,7 @@ def compile_rule_candidates(
                     reason_code="unsupported_field",
                     message=(
                         "规则候选目标范围不在当前检查能力矩阵内："
-                        f"{candidate.target_scope}"
+                        f"{target_scope}"
                     ),
                     excerpt=candidate.evidence_span[:300],
                 )
@@ -103,12 +104,12 @@ def compile_rule_candidates(
         regular_expectation = non_execution_expectation(normalized_expectation)
         expectation = supported_expectation(
             candidate.category,
-            candidate.target_scope,
+            target_scope,
             regular_expectation,
         )
         unsupported_fields = unsupported_expectation_fields(
             candidate.category,
-            candidate.target_scope,
+            target_scope,
             regular_expectation,
         )
         if uses_execution_backend:
@@ -134,10 +135,11 @@ def compile_rule_candidates(
             id=_candidate_rule_id(candidate),
             category=candidate.category,
             target=RuleTarget(
-                scope=candidate.target_scope,
-                selector=candidate.selector,
+                scope=target_scope,
+                selector=selector,
             ),
             expectation=expectation,
+            tolerance=_candidate_tolerance(expectation),
             severity=_candidate_severity(candidate.category),
             source=RuleSource(
                 type=source_type,
@@ -148,9 +150,11 @@ def compile_rule_candidates(
             confidence=candidate.confidence,
             enabled=True,
         )
+        needs_confirmation = _candidate_requires_confirmation(candidate, target_scope)
         if (
             candidate.checkability == "checkable"
             and candidate.confidence >= AUTO_CHECK_MIN_CONFIDENCE
+            and not needs_confirmation
         ):
             result.auto_checkable_candidate_count += 1
             result.rules.append(rule)
@@ -170,7 +174,11 @@ def compile_rule_candidates(
                     location=candidate.location,
                     category=candidate.category,
                     reason_code="ambiguous_requirement",
-                    message=candidate.reason or "规则候选置信度不足，需要人工确认后才能自动检查。",
+                    message=(
+                        candidate.reason
+                        or _confirmation_reason(candidate)
+                        or "规则候选置信度不足，需要人工确认后才能自动检查。"
+                    ),
                     excerpt=candidate.evidence_span[:300],
                 )
             )
@@ -189,6 +197,80 @@ def compile_rule_candidates(
                 )
             )
     return result
+
+
+def _normalized_target(candidate: ExtractedRuleCandidate) -> tuple[str, str | None]:
+    if candidate.category == RuleCategory.heading:
+        explicit_level = _explicit_heading_level(candidate.target_scope)
+        explicit_level = explicit_level or _explicit_heading_level(candidate.evidence_span)
+        if explicit_level is not None:
+            return f"heading.{explicit_level}", f"Heading {explicit_level}"
+    if (
+        candidate.category == RuleCategory.paragraph
+        and candidate.target_scope.lower() in {"document", "paragraph"}
+        and _is_body_paragraph_candidate(candidate)
+    ):
+        return "body.paragraph", None
+    return candidate.target_scope, candidate.selector
+
+
+def _candidate_requires_confirmation(
+    candidate: ExtractedRuleCandidate,
+    normalized_scope: str,
+) -> bool:
+    if candidate.category == RuleCategory.heading:
+        original_scope = candidate.target_scope.lower()
+        if original_scope in {"heading", "heading.paragraph"} and not re.search(
+            r"heading[ .]?[1-6]",
+            normalized_scope,
+            flags=re.I,
+        ):
+            return True
+    return (
+        candidate.category == RuleCategory.paragraph
+        and candidate.target_scope.lower() in {"document", "paragraph"}
+        and normalized_scope == candidate.target_scope
+    )
+
+
+def _confirmation_reason(candidate: ExtractedRuleCandidate) -> str | None:
+    if candidate.category == RuleCategory.heading:
+        return "标题候选没有明确到一级、二级或三级标题，已移入人工确认，避免套用到所有标题。"
+    if candidate.category == RuleCategory.paragraph:
+        return "段落候选没有明确作用范围，已移入人工确认，避免套用到摘要、关键词等专门段落。"
+    return None
+
+
+def _candidate_tolerance(expectation: dict[str, object]) -> dict[str, object]:
+    tolerance: dict[str, object] = {}
+    if "firstLineIndentCm" in expectation:
+        tolerance["firstLineIndentCm"] = 0.15
+    if "lineSpacing" in expectation:
+        tolerance["lineSpacing"] = 0.05
+    return tolerance
+
+
+def _explicit_heading_level(text: str | None) -> int | None:
+    if not text:
+        return None
+    for label, level in {
+        "一级标题": 1,
+        "二级标题": 2,
+        "三级标题": 3,
+        "四级标题": 4,
+        "五级标题": 5,
+        "六级标题": 6,
+    }.items():
+        if label in text:
+            return level
+    if match := re.search(r"heading[ .]?([1-6])", text, flags=re.I):
+        return int(match.group(1))
+    return None
+
+
+def _is_body_paragraph_candidate(candidate: ExtractedRuleCandidate) -> bool:
+    text = f"{candidate.selector or ''} {candidate.evidence_span}"
+    return any(label in text for label in ["正文段落", "正文", "body.paragraph"])
 
 
 def _candidate_rule_id(candidate: ExtractedRuleCandidate) -> str:

@@ -27,6 +27,8 @@ class ParagraphMatchIndex:
 
     def match_font_rule(self, rule: FormatRule) -> list[ParagraphNode]:
         selector = rule.target.selector
+        if _is_ambiguous_heading_candidate(rule):
+            return []
         if rule.target.scope.startswith("heading"):
             return [
                 paragraph
@@ -44,6 +46,8 @@ class ParagraphMatchIndex:
 
     def match_paragraph_rule(self, rule: FormatRule) -> list[ParagraphNode]:
         selector = rule.target.selector
+        if _is_ambiguous_heading_candidate(rule):
+            return []
         if rule.target.scope.startswith("heading"):
             return [
                 paragraph
@@ -55,6 +59,8 @@ class ParagraphMatchIndex:
             return _selector_matches(self.table_cell_paragraphs, selector)
         if rule.target.scope.startswith("body"):
             return self.body_paragraphs
+        if _is_document_body_selector(rule.target.scope, selector):
+            return _selector_matches(self.body_paragraphs, selector)
         if selector:
             return _selector_matches(self.non_heading_paragraphs, selector)
         return self.non_heading_paragraphs
@@ -103,6 +109,24 @@ def _selector_matches(
 def _is_table_cell_scope(scope: str) -> bool:
     normalized = scope.lower().replace("-", "_")
     return normalized.startswith(("table_cell", "table.cell", "table.paragraph"))
+
+
+def _is_document_body_selector(scope: str, selector: str | None) -> bool:
+    return scope.lower() in {"document", "paragraph"} and selector in {
+        "正文",
+        "正文段落",
+        "body",
+        "body.paragraph",
+    }
+
+
+def _is_ambiguous_heading_candidate(rule: FormatRule) -> bool:
+    if rule.target.scope.lower() not in {"heading", "heading.paragraph"}:
+        return False
+    selector = rule.target.selector or ""
+    if selector not in {"一级标题", "二级标题", "三级标题"}:
+        return False
+    return selector not in rule.source.excerpt
 
 
 def _matches_heading_level(

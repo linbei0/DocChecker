@@ -526,6 +526,57 @@ def test_body_rules_ignore_table_cells_unless_scope_is_explicit(tmp_path: Path) 
     assert table_finding.context["column_index"] == 0
 
 
+def test_document_body_selector_does_not_match_abstract_or_keywords(tmp_path: Path) -> None:
+    path = tmp_path / "document-body-selector.docx"
+    document = Document()
+    document.styles.add_style("正文段落", WD_STYLE_TYPE.PARAGRAPH)
+    document.add_paragraph("摘 要：摘要标签为黑体，内容为宋体。", style="正文段落")
+    document.add_paragraph("关键词：论文；格式", style="正文段落")
+    document.add_paragraph("1 绪论", style="Heading 1")
+    document.add_paragraph("正文内容", style="正文段落")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="document-body-selector.docx")
+    rule = FormatRule(
+        id="paragraph_candidate",
+        category=RuleCategory.paragraph,
+        target=RuleTarget(scope="document", selector="正文段落"),
+        expectation={"alignment": "justify"},
+        severity=Severity.minor,
+        source=RuleSource(type=SourceType.requirement_doc, excerpt="正文段落两端对齐"),
+    )
+
+    findings = CheckEngine().run(model, [rule])
+
+    assert [finding.excerpt for finding in findings] == ["正文内容"]
+
+
+def test_ambiguous_heading_candidate_without_source_label_is_ignored(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ambiguous-heading.docx"
+    document = Document()
+    document.add_paragraph("1 绪论", style="Heading 1")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="ambiguous-heading.docx")
+    rule = FormatRule(
+        id="heading_candidate",
+        category=RuleCategory.heading,
+        target=RuleTarget(scope="heading", selector="一级标题"),
+        expectation={"fontFamilyEastAsia": "宋体"},
+        severity=Severity.minor,
+        source=RuleSource(
+            type=SourceType.requirement_doc,
+            excerpt="三号宋体加粗居中，一般不多于30个字。",
+        ),
+    )
+
+    findings = CheckEngine().run(model, [rule])
+
+    assert findings == []
+
+
 def test_engine_logs_checker_failure(caplog: pytest.LogCaptureFixture) -> None:
     class FailingChecker:
         checker_id = "failing"

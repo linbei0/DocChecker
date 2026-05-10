@@ -76,6 +76,15 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
                 "fontSizePt",
             }
         ),
+        scope_prefixes=(
+            "body.paragraph",
+            "abstract.paragraph",
+            "keywords.paragraph",
+            "heading",
+            "table_cell",
+            "table.cell",
+            "table.paragraph",
+        ),
         field_descriptions={
             "alignment": "段落对齐方式：left、center、right、justify。",
             "firstLineIndentCm": "首行缩进，单位厘米。",

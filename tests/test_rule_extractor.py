@@ -8,8 +8,10 @@ from docx.shared import Pt
 
 from docchecker.checkers.capabilities import CHECKER_CAPABILITIES, capability_manifest
 from docchecker.core.config import get_settings
-from docchecker.domain.enums import SourceType
+from docchecker.domain.enums import RuleCategory, SourceType
+from docchecker.domain.rules import ExtractedRuleCandidate
 from docchecker.services.requirement_parser import parse_requirement_document
+from docchecker.services.rule_compiler import compile_rule_candidates
 from docchecker.services.rule_extractor import (
     RuleExtractionConfigurationError,
     extract_rules_from_requirement_document,
@@ -41,6 +43,53 @@ def test_extract_rules_reports_warning_for_unrecognized_text() -> None:
     assert result.rules == []
     assert result.parse_warnings
     assert result.extraction_summary.structured_rules == 0
+
+
+def test_compiler_requires_confirmation_for_ambiguous_heading_candidate() -> None:
+    candidate = ExtractedRuleCandidate(
+        category=RuleCategory.heading,
+        target_scope="heading",
+        selector="一级标题",
+        expectation={
+            "fontFamilyEastAsia": "宋体",
+            "fontSizePt": 16,
+            "bold": True,
+            "alignment": "center",
+        },
+        evidence_span="三号宋体加粗居中，一般不多于30个字。",
+        checkability="checkable",
+        confidence=1,
+    )
+
+    result = compile_rule_candidates([candidate], source_type=SourceType.requirement_doc)
+
+    assert result.rules == []
+    assert len(result.suggested_rules) == 1
+    assert result.suggested_rules[0].confirmation_required is True
+    assert result.issues[0].reason_code == "ambiguous_requirement"
+
+
+def test_compiler_normalizes_document_body_paragraph_candidate() -> None:
+    candidate = ExtractedRuleCandidate(
+        category=RuleCategory.paragraph,
+        target_scope="document",
+        selector="正文段落",
+        expectation={
+            "alignment": "justify",
+            "firstLineIndentCm": 0.847,
+            "lineSpacing": 1.5,
+        },
+        evidence_span="××××××××××（正文段落）",
+        checkability="checkable",
+        confidence=0.9,
+    )
+
+    result = compile_rule_candidates([candidate], source_type=SourceType.requirement_doc)
+
+    assert len(result.rules) == 1
+    assert result.rules[0].target.scope == "body.paragraph"
+    assert result.rules[0].target.selector is None
+    assert result.rules[0].tolerance == {"firstLineIndentCm": 0.15, "lineSpacing": 0.05}
 
 
 def test_extract_title_rule_from_comment_style_text() -> None:
