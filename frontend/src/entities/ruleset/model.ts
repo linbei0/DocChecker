@@ -109,9 +109,12 @@ export const ruleExtractionTraceSchema = z.object({
   issues: z.array(ruleExtractionIssueSchema).optional(),
   stats: z
     .object({
+      processed_block_count: z.number().optional(),
+      batch_count: z.number().optional(),
       local_candidate_count: z.number(),
       llm_candidate_count: z.number(),
       llm_rejected_count: z.number(),
+      rejected_candidate_count: z.number().optional(),
       unsupported_field_count: z.number(),
       conflict_count: z.number(),
       auto_checkable_candidate_count: z.number(),
@@ -145,7 +148,8 @@ export const draftRuleSetSchema = z.object({
   extraction_summary: extractionSummarySchema.optional(),
   unsupported_requirements: z.array(unsupportedRequirementSchema).optional(),
   extraction_trace: ruleExtractionTraceSchema.nullish(),
-  status: z.enum(['draft', 'published']),
+  status: z.enum(['processing', 'draft', 'published', 'failed']),
+  error: z.string().nullish(),
   published_ruleset_id: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),

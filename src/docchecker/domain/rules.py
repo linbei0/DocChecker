@@ -128,9 +128,12 @@ class RuleExtractionIssue(BaseModel):
 class RuleExtractionStats(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    processed_block_count: int = 0
+    batch_count: int = 0
     local_candidate_count: int = 0
     llm_candidate_count: int = 0
     llm_rejected_count: int = 0
+    rejected_candidate_count: int = 0
     unsupported_field_count: int = 0
     conflict_count: int = 0
     auto_checkable_candidate_count: int = 0
@@ -176,6 +179,7 @@ class DraftRuleSet(BaseModel):
     unsupported_requirements: list[UnsupportedRequirement] = Field(default_factory=list)
     extraction_trace: RuleExtractionTrace | None = None
     status: DraftRuleSetStatus = DraftRuleSetStatus.draft
+    error: str | None = None
     published_ruleset_id: str | None = None
     created_at: str
     updated_at: str

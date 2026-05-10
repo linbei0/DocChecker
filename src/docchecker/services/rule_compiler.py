@@ -174,6 +174,20 @@ def compile_rule_candidates(
                     excerpt=candidate.evidence_span[:300],
                 )
             )
+        else:
+            result.needs_confirmation_candidate_count += 1
+            result.issues.append(
+                RuleExtractionIssue(
+                    location=candidate.location,
+                    category=candidate.category,
+                    reason_code="ambiguous_requirement",
+                    message=(
+                        candidate.reason
+                        or "规则候选置信度过低，未进入自动检查；请人工核对原文要求。"
+                    ),
+                    excerpt=candidate.evidence_span[:300],
+                )
+            )
     return result
 
 

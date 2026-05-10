@@ -53,8 +53,14 @@ class ParagraphNode(BaseModel):
 
     index: int
     text: str
+    story: str = "body"
+    part_name: str = "word/document.xml"
     style_name: str | None = None
     section_index: int = 0
+    table_index: int | None = None
+    row_index: int | None = None
+    column_index: int | None = None
+    cell_paragraph_index: int | None = None
     font_family: str | None = None
     font_family_east_asia: str | None = None
     font_family_ascii: str | None = None

@@ -8,6 +8,8 @@ import {
   ChevronDown,
   Download,
   Edit2,
+  PlusCircle,
+  Trash2,
   XCircle,
 } from 'lucide-react'
 import { Button } from '@/shared/ui/Button'
@@ -44,6 +46,15 @@ type UnsupportedReviewItem = {
 }
 
 type ReviewItem = RuleReviewItem | UnsupportedReviewItem
+type EditableValueKind = 'string' | 'number' | 'boolean' | 'list' | 'json'
+
+type ExpectationDraftField = {
+  key: string
+  value: string
+  kind: EditableValueKind
+}
+
+type ExpectationDraftPatch = Partial<ExpectationDraftField>
 
 export function RuleConfirmPage() {
   const { taskId: draftId = '' } = useParams<{ taskId: string }>()
@@ -55,7 +66,7 @@ export function RuleConfirmPage() {
   const [rules, setRules] = useState<FormatRule[]>([])
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
-  const [expectationText, setExpectationText] = useState('')
+  const [expectationDraft, setExpectationDraft] = useState<ExpectationDraftField[]>([])
   const [activeFilter, setActiveFilter] = useState<ReviewFilter>('all')
   const [error, setError] = useState<string | null>(null)
 
@@ -121,20 +132,36 @@ export function RuleConfirmPage() {
   const startEditing = (rule: FormatRule) => {
     setEditingRuleId(rule.id)
     setExpandedItemId(`rule:${rule.id}`)
-    setExpectationText(JSON.stringify(rule.expectation, null, 2))
+    setExpectationDraft(createExpectationDraft(rule.expectation))
   }
 
   const saveRuleEdit = (ruleId: string) => {
-    try {
-      const parsed = JSON.parse(expectationText) as Record<string, unknown>
-      setRules((prev) =>
-        prev.map((rule) => (rule.id === ruleId ? { ...rule, expectation: parsed } : rule)),
-      )
-      setEditingRuleId(null)
-      setError(null)
-    } catch {
-      setError('期望值必须是合法 JSON。')
+    const parsed = serializeExpectationDraft(expectationDraft)
+    if (!parsed.ok) {
+      setError(parsed.error)
+      return
     }
+    setRules((prev) =>
+      prev.map((rule) => (rule.id === ruleId ? { ...rule, expectation: parsed.value } : rule)),
+    )
+    setEditingRuleId(null)
+    setError(null)
+  }
+
+  const updateExpectationDraftField = (index: number, patch: ExpectationDraftPatch) => {
+    setExpectationDraft((prev) =>
+      prev.map((field, currentIndex) =>
+        currentIndex === index ? { ...field, ...patch } : field,
+      ),
+    )
+  }
+
+  const addExpectationDraftField = () => {
+    setExpectationDraft((prev) => [...prev, { key: '', value: '', kind: 'string' }])
+  }
+
+  const removeExpectationDraftField = (index: number) => {
+    setExpectationDraft((prev) => prev.filter((_, currentIndex) => currentIndex !== index))
   }
 
   const handleConfirmAndCheck = async () => {
@@ -208,6 +235,64 @@ export function RuleConfirmPage() {
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             返回新建检查
           </Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (draft.status === 'processing') {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary-50">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg font-semibold text-neutral-950">正在生成候选规则</h1>
+              <p className="mt-2 text-sm leading-relaxed text-neutral-600">
+                规范文档已经进入后台抽取流程。本页会自动刷新，生成完成后进入规则确认工作台。
+              </p>
+              <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                {draft.parse_warnings[0] || '规则抽取正在后台执行。'}
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button variant="secondary" onClick={() => navigate('/checks/new')}>
+                  <ArrowLeft className="mr-1.5 h-4 w-4" />
+                  返回新建检查
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (draft.status === 'failed') {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="rounded-2xl border border-danger-100 bg-white p-8 shadow-sm">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-danger-50">
+              <AlertCircle className="h-6 w-6 text-danger-600" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg font-semibold text-neutral-950">候选规则生成失败</h1>
+              <p className="mt-2 text-sm leading-relaxed text-neutral-600">
+                后台抽取流程返回了明确错误，当前草稿不会进入发布步骤。
+              </p>
+              <div className="mt-5 whitespace-pre-wrap break-words rounded-xl border border-danger-100 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+                {draft.error || '未知错误'}
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Button variant="secondary" onClick={() => navigate('/checks/new')}>
+                  <ArrowLeft className="mr-1.5 h-4 w-4" />
+                  返回新建检查
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -303,10 +388,21 @@ export function RuleConfirmPage() {
               导出能力缺口
             </Button>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+            <TraceMetric
+              label="处理规范块"
+              value={draft.extraction_trace.stats.processed_block_count ?? '-'}
+            />
+            <TraceMetric label="抽取批次" value={draft.extraction_trace.stats.batch_count ?? '-'} />
             <TraceMetric label="本地候选" value={draft.extraction_trace.stats.local_candidate_count} />
             <TraceMetric label="LLM 候选" value={draft.extraction_trace.stats.llm_candidate_count} />
-            <TraceMetric label="LLM 拒绝" value={draft.extraction_trace.stats.llm_rejected_count} />
+            <TraceMetric
+              label="候选拒绝"
+              value={
+                draft.extraction_trace.stats.rejected_candidate_count ??
+                draft.extraction_trace.stats.llm_rejected_count
+              }
+            />
             <TraceMetric label="字段不支持" value={draft.extraction_trace.stats.unsupported_field_count} />
             <TraceMetric
               label="自动转化率"
@@ -438,13 +534,15 @@ export function RuleConfirmPage() {
                     rule={item.rule}
                     expanded={expandedItemId === item.id}
                     editing={editingRuleId === item.rule.id}
-                    expectationText={expectationText}
-                    onExpectationTextChange={setExpectationText}
+                    expectationDraft={expectationDraft}
                     onToggle={() => toggleRule(item.rule.id)}
                     onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
                     onEdit={() => startEditing(item.rule)}
                     onCancelEdit={() => setEditingRuleId(null)}
                     onSaveEdit={() => saveRuleEdit(item.rule.id)}
+                    onDraftFieldChange={updateExpectationDraftField}
+                    onAddDraftField={addExpectationDraftField}
+                    onRemoveDraftField={removeExpectationDraftField}
                     onSeverityChange={(severity) =>
                       setRules((prev) =>
                         prev.map((rule) =>
@@ -843,31 +941,33 @@ function RuleRow({
   rule,
   expanded,
   editing,
-  expectationText,
-  onExpectationTextChange,
+  expectationDraft,
   onToggle,
   onExpand,
   onEdit,
   onCancelEdit,
   onSaveEdit,
+  onDraftFieldChange,
+  onAddDraftField,
+  onRemoveDraftField,
   onSeverityChange,
 }: {
   rule: FormatRule
   expanded: boolean
   editing: boolean
-  expectationText: string
-  onExpectationTextChange: (value: string) => void
+  expectationDraft: ExpectationDraftField[]
   onToggle: () => void
   onExpand: () => void
   onEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: () => void
+  onDraftFieldChange: (index: number, patch: ExpectationDraftPatch) => void
+  onAddDraftField: () => void
+  onRemoveDraftField: (index: number) => void
   onSeverityChange: (value: FormatRule['severity']) => void
 }) {
   const isEnabled = rule.enabled !== false
-  const expectationStr = Object.entries(rule.expectation)
-    .map(([key, value]) => `${key}: ${String(value)}`)
-    .join(', ')
+  const expectationStr = formatExpectationSummary(rule.expectation)
 
   return (
     <tbody className="border-b border-neutral-100 last:border-b-0">
@@ -886,13 +986,13 @@ function RuleRow({
           />
         </td>
         <td className="px-4 py-3.5 text-sm font-medium text-neutral-900 sm:px-6">
-          {rule.category}
+          {categoryLabel(rule.category)}
         </td>
         <td className="px-4 py-3.5 sm:px-6">
           <CapabilityBadge status={rule.capability_status || 'auto_checkable'} />
         </td>
         <td className="px-4 py-3.5 text-sm text-neutral-600 sm:px-6">
-          <span className="line-clamp-1">{rule.target.selector || rule.target.scope}</span>
+          <span className="line-clamp-1">{formatRuleTarget(rule)}</span>
         </td>
         <td className="px-4 py-3.5 text-sm text-neutral-700 sm:px-6">
           <span className={cn('line-clamp-2', !isEnabled && 'text-neutral-400')} title={expectationStr}>
@@ -926,7 +1026,7 @@ function RuleRow({
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <div className="h-1.5 w-1.5 rounded-full bg-primary-400" />
-                  <p className="text-xs font-semibold text-neutral-700">来源片段</p>
+                  <p className="text-xs font-semibold text-neutral-700">原文证据</p>
                 </div>
                 <p className="rounded-xl border border-neutral-200/80 bg-white p-4 text-sm leading-relaxed text-neutral-700 shadow-sm">
                   {rule.source.excerpt || '无来源片段'}
@@ -936,14 +1036,31 @@ function RuleRow({
                   <span>置信度：{Math.round((rule.confidence ?? 1) * 100)}%</span>
                   <span>证据类型：{evidenceTypeLabel(rule.source.evidence_type || 'explicit_text')}</span>
                 </div>
+                <div className="rounded-xl border border-neutral-200/80 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold text-neutral-700">系统理解</p>
+                  <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <DetailTerm label="类别" value={categoryLabel(rule.category)} />
+                    <DetailTerm label="影响范围" value={formatRuleTarget(rule)} />
+                    <DetailTerm label="期望规则" value={formatExpectationSummary(rule.expectation)} wide />
+                  </dl>
+                </div>
                 {rule.capability_status === 'needs_confirmation' && (
                   <div className="flex items-start gap-2.5 rounded-xl bg-warning-50 px-4 py-3 text-xs leading-relaxed text-warning-700">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-500" />
-                    这条规则需要你人工确认后再启用。编辑期望值并打开左侧开关后，它才会参与正式检查。
+                    这条规则需要先确认语义和期望值。确认后打开左侧开关，它才会参与正式检查。
                   </div>
                 )}
               </div>
               <div className="space-y-4">
+                <div className="rounded-xl border border-neutral-200/80 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-neutral-700">可校验性</p>
+                    <CapabilityBadge status={rule.capability_status || 'auto_checkable'} />
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-neutral-600">
+                    {capabilityExplanation(rule)}
+                  </p>
+                </div>
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-neutral-700">严重度</span>
                   <select
@@ -961,12 +1078,17 @@ function RuleRow({
                 </label>
                 {editing ? (
                   <div className="space-y-2">
-                    <span className="text-xs font-semibold text-neutral-700">期望值 JSON</span>
-                    <textarea
-                      value={expectationText}
-                      onChange={(event) => onExpectationTextChange(event.target.value)}
-                      rows={5}
-                      className="w-full rounded-xl border border-neutral-200 bg-white p-3.5 font-mono text-xs leading-relaxed text-neutral-800 shadow-sm transition-colors focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-neutral-700">期望值</span>
+                      <Button type="button" size="sm" variant="ghost" onClick={onAddDraftField}>
+                        <PlusCircle className="mr-1.5 h-3.5 w-3.5" />
+                        添加字段
+                      </Button>
+                    </div>
+                    <ExpectationEditor
+                      fields={expectationDraft}
+                      onFieldChange={onDraftFieldChange}
+                      onRemoveField={onRemoveDraftField}
                     />
                     <div className="flex gap-2 pt-1">
                       <Button size="sm" onClick={onSaveEdit}>
@@ -978,10 +1100,18 @@ function RuleRow({
                     </div>
                   </div>
                 ) : (
-                  <Button size="sm" variant="secondary" onClick={onEdit}>
-                    <Edit2 className="mr-1.5 h-3.5 w-3.5" />
-                    编辑期望值
-                  </Button>
+                  <div className="rounded-xl border border-neutral-200/80 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold text-neutral-700">期望值</p>
+                        <ExpectationPreview expectation={rule.expectation} />
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={onEdit}>
+                        <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+                        编辑
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -989,6 +1119,179 @@ function RuleRow({
         </tr>
       )}
     </tbody>
+  )
+}
+
+function DetailTerm({
+  label,
+  value,
+  wide,
+}: {
+  label: string
+  value: string
+  wide?: boolean
+}) {
+  return (
+    <div className={cn('min-w-0', wide && 'sm:col-span-2')}>
+      <dt className="text-[11px] font-medium text-neutral-500">{label}</dt>
+      <dd className="mt-1 break-words text-neutral-900">{value || '-'}</dd>
+    </div>
+  )
+}
+
+function ExpectationPreview({ expectation }: { expectation: Record<string, unknown> }) {
+  const entries = Object.entries(expectation)
+  if (entries.length === 0) {
+    return <p className="mt-2 text-sm text-neutral-400">未设置期望字段</p>
+  }
+
+  return (
+    <dl className="mt-3 grid gap-2">
+      {entries.map(([key, value]) => (
+        <div key={key} className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]">
+          <dt className="min-w-0 text-neutral-500">{fieldLabel(key)}</dt>
+          <dd className="min-w-0 break-words text-neutral-900">
+            {formatExpectationValue(key, value)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ExpectationEditor({
+  fields,
+  onFieldChange,
+  onRemoveField,
+}: {
+  fields: ExpectationDraftField[]
+  onFieldChange: (index: number, patch: ExpectationDraftPatch) => void
+  onRemoveField: (index: number) => void
+}) {
+  if (fields.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-neutral-300 bg-white px-4 py-6 text-center text-sm text-neutral-500">
+        当前没有期望字段。
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <datalist id="expectation-field-options">
+        {FIELD_OPTIONS.map((field) => (
+          <option key={field.key} value={field.key}>
+            {field.label}
+          </option>
+        ))}
+      </datalist>
+      {fields.map((field, index) => (
+        <div
+          key={`${field.key || 'new'}-${index}`}
+          className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm"
+        >
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_8rem_1.4fr_auto]">
+            <label className="min-w-0 space-y-1.5">
+              <span className="text-[11px] font-medium text-neutral-500">字段</span>
+              <input
+                list="expectation-field-options"
+                value={field.key}
+                onChange={(event) => onFieldChange(index, { key: event.target.value })}
+                className="h-9 w-full rounded-lg border border-neutral-200 px-3 text-sm text-neutral-900 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                placeholder="例如 fontSizePt"
+              />
+              {field.key && (
+                <span className="block truncate text-[11px] text-neutral-400">
+                  {fieldLabel(field.key)}
+                </span>
+              )}
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] font-medium text-neutral-500">类型</span>
+              <select
+                value={field.kind}
+                onChange={(event) =>
+                  onFieldChange(index, normalizeDraftKindChange(field, event.target.value as EditableValueKind))
+                }
+                className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-2.5 text-sm text-neutral-900 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+              >
+                <option value="string">文本</option>
+                <option value="number">数字</option>
+                <option value="boolean">是/否</option>
+                <option value="list">列表</option>
+                <option value="json">复杂值</option>
+              </select>
+            </label>
+            <ExpectationValueInput
+              field={field}
+              onChange={(value) => onFieldChange(index, { value })}
+            />
+            <button
+              type="button"
+              onClick={() => onRemoveField(index)}
+              className="inline-flex h-9 w-9 items-center justify-center self-end rounded-lg text-neutral-400 transition-colors hover:bg-danger-50 hover:text-danger-600"
+              aria-label="删除期望字段"
+              title="删除期望字段"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ExpectationValueInput({
+  field,
+  onChange,
+}: {
+  field: ExpectationDraftField
+  onChange: (value: string) => void
+}) {
+  if (field.kind === 'boolean') {
+    return (
+      <label className="space-y-1.5">
+        <span className="text-[11px] font-medium text-neutral-500">值</span>
+        <select
+          value={field.value}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-2.5 text-sm text-neutral-900 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+        >
+          <option value="true">是</option>
+          <option value="false">否</option>
+        </select>
+      </label>
+    )
+  }
+
+  if (field.kind === 'json') {
+    return (
+      <label className="space-y-1.5">
+        <span className="text-[11px] font-medium text-neutral-500">复杂值</span>
+        <textarea
+          value={field.value}
+          onChange={(event) => onChange(event.target.value)}
+          rows={2}
+          className="min-h-9 w-full rounded-lg border border-neutral-200 px-3 py-2 font-mono text-xs text-neutral-900 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+        />
+      </label>
+    )
+  }
+
+  return (
+    <label className="space-y-1.5">
+      <span className="text-[11px] font-medium text-neutral-500">
+        {field.kind === 'list' ? '值，多个用逗号分隔' : '值'}
+      </span>
+      <input
+        value={field.value}
+        type={field.kind === 'number' ? 'number' : 'text'}
+        step={field.kind === 'number' ? 'any' : undefined}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 w-full rounded-lg border border-neutral-200 px-3 text-sm text-neutral-900 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+      />
+    </label>
   )
 }
 
@@ -1058,3 +1361,216 @@ function unsupportedActionHint(requirement: UnsupportedRequirement) {
   }
   return '这类项当前没有对应检查器，暂时不能直接人工确认成自动检查规则。'
 }
+
+function createExpectationDraft(expectation: Record<string, unknown>): ExpectationDraftField[] {
+  return Object.entries(expectation).map(([key, value]) => ({
+    key,
+    value: draftValue(value),
+    kind: inferValueKind(value),
+  }))
+}
+
+function serializeExpectationDraft(
+  fields: ExpectationDraftField[],
+): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  if (fields.length === 0) {
+    return { ok: false, error: '至少保留一个期望字段。' }
+  }
+
+  const expectation: Record<string, unknown> = {}
+  const seen = new Set<string>()
+  for (const field of fields) {
+    const key = field.key.trim()
+    if (!key) return { ok: false, error: '期望值字段名称不能为空。' }
+    if (seen.has(key)) return { ok: false, error: `期望值字段重复：${key}` }
+    seen.add(key)
+
+    const parsed = parseDraftValue(field)
+    if (!parsed.ok) return parsed
+    expectation[key] = parsed.value
+  }
+  return { ok: true, value: expectation }
+}
+
+function parseDraftValue(
+  field: ExpectationDraftField,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (field.kind === 'number') {
+    const value = Number(field.value)
+    if (!Number.isFinite(value)) {
+      return { ok: false, error: `${fieldLabel(field.key)} 必须是有效数字。` }
+    }
+    return { ok: true, value }
+  }
+  if (field.kind === 'boolean') {
+    return { ok: true, value: field.value === 'true' }
+  }
+  if (field.kind === 'list') {
+    return {
+      ok: true,
+      value: field.value
+        .split(/[,，、]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    }
+  }
+  if (field.kind === 'json') {
+    try {
+      return { ok: true, value: JSON.parse(field.value) as unknown }
+    } catch {
+      return { ok: false, error: `${fieldLabel(field.key)} 的复杂值格式不正确。` }
+    }
+  }
+  return { ok: true, value: field.value }
+}
+
+function inferValueKind(value: unknown): EditableValueKind {
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  if (Array.isArray(value)) return 'list'
+  if (typeof value === 'object' && value !== null) return 'json'
+  return 'string'
+}
+
+function draftValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => String(item)).join('，')
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value, null, 2)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function normalizeDraftKindChange(
+  field: ExpectationDraftField,
+  nextKind: EditableValueKind,
+): ExpectationDraftPatch {
+  if (nextKind === field.kind) return { kind: nextKind }
+  if (nextKind === 'boolean') {
+    return { kind: nextKind, value: field.value === 'false' ? 'false' : 'true' }
+  }
+  if (nextKind === 'number') {
+    return { kind: nextKind, value: Number.isFinite(Number(field.value)) ? field.value : '' }
+  }
+  if (nextKind === 'json') {
+    return { kind: nextKind, value: JSON.stringify(field.value, null, 2) }
+  }
+  return { kind: nextKind, value: field.value }
+}
+
+function formatExpectationSummary(expectation: Record<string, unknown>) {
+  const entries = Object.entries(expectation)
+  if (entries.length === 0) return '未设置期望字段'
+  return entries.map(([key, value]) => `${fieldLabel(key)}：${formatExpectationValue(key, value)}`).join('，')
+}
+
+function formatExpectationValue(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '未填写'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (Array.isArray(value)) return value.map((item) => formatExpectationValue(key, item)).join('、')
+  if (typeof value === 'object') return JSON.stringify(value)
+  const unit = fieldUnit(key)
+  return unit ? `${String(value)} ${unit}` : String(value)
+}
+
+function fieldLabel(key: string) {
+  return FIELD_META[key]?.label || key
+}
+
+function fieldUnit(key: string) {
+  return FIELD_META[key]?.unit
+}
+
+function categoryLabel(category: string) {
+  return CATEGORY_LABELS[category] || category
+}
+
+function targetScopeLabel(scope: string) {
+  return TARGET_SCOPE_LABELS[scope] || scope
+}
+
+function formatRuleTarget(rule: FormatRule) {
+  return [targetScopeLabel(rule.target.scope), rule.target.selector].filter(Boolean).join(' / ')
+}
+
+function capabilityExplanation(rule: FormatRule) {
+  const status = rule.capability_status || 'auto_checkable'
+  if (status === 'auto_checkable') {
+    return '该规则已匹配到现有检查器，启用后会自动检查并生成证据位置。'
+  }
+  if (status === 'needs_confirmation') {
+    return rule.source.evidence_type === 'llm_candidate'
+      ? '该规则来自 LLM 候选或置信度偏低，需要人工确认后再进入自动检查。'
+      : '该规则字段可被系统处理，但目标范围或期望值仍需要人工确认。'
+  }
+  if (status === 'conflict') {
+    return '系统识别到同一目标附近存在冲突表达，需要先确定最终采用哪条规则。'
+  }
+  if (status === 'parse_error') {
+    return '系统解析这条规则时遇到错误，应回到原始规范文本定位问题后再发布。'
+  }
+  return '该规则当前不能进入自动检查，可导出为能力缺口并用于后续补检查器。'
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  font: '字体',
+  paragraph: '段落',
+  heading: '标题',
+  page: '页面',
+  header_footer: '页眉页脚',
+  caption: '图表题注',
+  reference: '参考文献',
+  structure: '结构',
+  toc: '目录',
+  abstract: '摘要',
+}
+
+const TARGET_SCOPE_LABELS: Record<string, string> = {
+  document: '全文',
+  section: '章节',
+  paragraph: '段落',
+  'body.paragraph': '正文段落',
+  heading: '标题',
+  table: '表格',
+  header_footer: '页眉页脚',
+  caption: '图表题注',
+  reference: '参考文献',
+  toc: '目录',
+  abstract: '摘要',
+  page: '页面',
+  'document.page': '页面设置',
+}
+
+const FIELD_META: Record<string, { label: string; unit?: string }> = {
+  fontFamilyEastAsia: { label: '中文字体' },
+  fontFamilyAscii: { label: '英文字体' },
+  fontSizePt: { label: '字号', unit: 'pt' },
+  bold: { label: '加粗' },
+  alignment: { label: '对齐方式' },
+  firstLineIndentCm: { label: '首行缩进', unit: 'cm' },
+  lineSpacing: { label: '行距' },
+  spaceBeforePt: { label: '段前间距', unit: 'pt' },
+  spaceAfterPt: { label: '段后间距', unit: 'pt' },
+  textContains: { label: '必须包含文本' },
+  requiresPageNumber: { label: '必须包含页码' },
+  captionPattern: { label: '题注编号格式' },
+  requiresTableCaption: { label: '表格题注' },
+  requiresFigureCaption: { label: '图片题注' },
+  tableCaptionPosition: { label: '表题位置' },
+  figureCaptionPosition: { label: '图题位置' },
+  referenceStyle: { label: '参考文献样式' },
+  requiredSections: { label: '必要章节' },
+  order: { label: '章节顺序' },
+  autoGenerated: { label: '自动生成' },
+  page_width_cm: { label: '页面宽度', unit: 'cm' },
+  page_height_cm: { label: '页面高度', unit: 'cm' },
+  margin_top_cm: { label: '上边距', unit: 'cm' },
+  margin_bottom_cm: { label: '下边距', unit: 'cm' },
+  margin_left_cm: { label: '左边距', unit: 'cm' },
+  margin_right_cm: { label: '右边距', unit: 'cm' },
+  header_distance_cm: { label: '页眉距边界', unit: 'cm' },
+  footer_distance_cm: { label: '页脚距边界', unit: 'cm' },
+}
+
+const FIELD_OPTIONS = Object.entries(FIELD_META).map(([key, value]) => ({
+  key,
+  label: value.label,
+}))

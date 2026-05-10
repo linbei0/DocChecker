@@ -132,7 +132,35 @@ export function TemplatesPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-neutral-200 md:hidden">
+              {ruleSets.map((ruleSet) => {
+                const isExpanded = expandedRuleSetId === ruleSet.id
+                const isEditing = editingRuleSetId === ruleSet.id
+                return (
+                  <TemplateCard
+                    key={ruleSet.id}
+                    ruleSet={ruleSet}
+                    isExpanded={isExpanded}
+                    isEditing={isEditing}
+                    draftName={draftName}
+                    isSaving={updateRuleSetMutation.isPending && isEditing}
+                    isDeleting={deletingRuleSetId === ruleSet.id}
+                    renameError={
+                      updateRuleSetMutation.isError && isEditing
+                        ? updateRuleSetMutation.error.message
+                        : null
+                    }
+                    onToggle={() => setExpandedRuleSetId(isExpanded ? null : ruleSet.id)}
+                    onStartEditing={() => startEditing(ruleSet)}
+                    onCancelEditing={cancelEditing}
+                    onDraftNameChange={setDraftName}
+                    onSubmitRename={submitRename}
+                    onDelete={() => deleteRuleSet(ruleSet)}
+                  />
+                )
+              })}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
               <thead className="bg-neutral-50">
                 <tr>
@@ -215,11 +243,121 @@ export function TemplatesPage() {
       </section>
 
       {expandedRuleSet && (
-        <section className="mt-5 rounded-xl border border-neutral-200 bg-white shadow-sm lg:hidden">
+        <section className="mt-5 hidden rounded-xl border border-neutral-200 bg-white shadow-sm md:block lg:hidden">
           <RuleDetails ruleSet={expandedRuleSet} />
         </section>
       )}
     </div>
+  )
+}
+
+type TemplateItemProps = {
+  ruleSet: RuleSet
+  isExpanded: boolean
+  isEditing: boolean
+  draftName: string
+  isSaving: boolean
+  isDeleting: boolean
+  renameError: string | null
+  onToggle: () => void
+  onStartEditing: () => void
+  onCancelEditing: () => void
+  onDraftNameChange: (value: string) => void
+  onSubmitRename: (event: FormEvent<HTMLFormElement>) => void
+  onDelete: () => void
+}
+
+function TemplateCard({
+  ruleSet,
+  isExpanded,
+  isEditing,
+  draftName,
+  isSaving,
+  isDeleting,
+  renameError,
+  onToggle,
+  onStartEditing,
+  onCancelEditing,
+  onDraftNameChange,
+  onSubmitRename,
+  onDelete,
+}: TemplateItemProps) {
+  return (
+    <article className="px-5 py-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+          <FileText className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          {isEditing ? (
+            <form className="space-y-2" onSubmit={onSubmitRename}>
+              <input
+                value={draftName}
+                onChange={(event) => onDraftNameChange(event.target.value)}
+                className="h-10 w-full rounded-lg border border-neutral-300 px-3 text-sm text-neutral-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                autoFocus
+              />
+              {renameError && <p className="text-xs text-danger-600">{renameError}</p>}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" type="submit" isLoading={isSaving} disabled={!draftName.trim()}>
+                  保存
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={onCancelEditing}>
+                  取消
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-medium text-neutral-950">{ruleSet.name}</h2>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    {sourceText[ruleSet.source_type]} · {ruleSet.rules.length} 条规则
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-primary-700"
+                  aria-label={isExpanded ? '收起规则明细' : '查看规则明细'}
+                  title={isExpanded ? '收起规则明细' : '查看规则明细'}
+                >
+                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-neutral-400">
+                v{ruleSet.version} · {new Date(ruleSet.created_at).toLocaleString()}
+              </p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={onStartEditing}
+                  className="text-sm text-primary-600 hover:underline"
+                >
+                  编辑名称
+                </button>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  disabled={isDeleting}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="删除规则模板"
+                  title="删除规则模板"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {isExpanded && (
+        <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <RuleDetails ruleSet={ruleSet} />
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -237,21 +375,7 @@ function TemplateRows({
   onDraftNameChange,
   onSubmitRename,
   onDelete,
-}: {
-  ruleSet: RuleSet
-  isExpanded: boolean
-  isEditing: boolean
-  draftName: string
-  isSaving: boolean
-  isDeleting: boolean
-  renameError: string | null
-  onToggle: () => void
-  onStartEditing: () => void
-  onCancelEditing: () => void
-  onDraftNameChange: (value: string) => void
-  onSubmitRename: (event: FormEvent<HTMLFormElement>) => void
-  onDelete: () => void
-}) {
+}: TemplateItemProps) {
   return (
     <>
       <tr className={cn('hover:bg-neutral-50', isExpanded && 'bg-primary-50/40')}>
@@ -441,16 +565,17 @@ function formatTarget(rule: FormatRule) {
 function formatRecord(record: Record<string, unknown> | undefined) {
   if (!record || Object.keys(record).length === 0) return '-'
   return Object.entries(record)
-    .map(([key, value]) => `${fieldText[key] || key}：${formatValue(value)}`)
+    .map(([key, value]) => `${fieldText[key] || key}：${formatValue(key, value)}`)
     .join('\n')
 }
 
-function formatValue(value: unknown): string {
+function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '-'
-  if (Array.isArray(value)) return value.map(formatValue).join('、')
+  if (Array.isArray(value)) return value.map((item) => formatValue(key, item)).join('、')
   if (typeof value === 'object') return JSON.stringify(value, null, 2)
   if (typeof value === 'boolean') return value ? '是' : '否'
-  return String(value)
+  const unit = fieldUnitText[key]
+  return unit ? `${String(value)} ${unit}` : String(value)
 }
 
 const sourceText = {
@@ -502,6 +627,20 @@ const targetScopeText: Record<string, string> = {
 }
 
 const fieldText: Record<string, string> = {
+  fontFamilyEastAsia: '中文字体',
+  fontFamilyAscii: '英文字体',
+  fontSizePt: '字号',
+  firstLineIndentCm: '首行缩进',
+  lineSpacing: '行距',
+  spaceBeforePt: '段前',
+  spaceAfterPt: '段后',
+  textContains: '必须包含文本',
+  requiresPageNumber: '必须包含页码',
+  captionPattern: '题注编号格式',
+  requiresTableCaption: '表格题注',
+  requiresFigureCaption: '图片题注',
+  tableCaptionPosition: '表题位置',
+  figureCaptionPosition: '图题位置',
   font_family: '字体',
   font_family_east_asia: '中文字体',
   font_family_ascii: '西文字体',
@@ -518,4 +657,25 @@ const fieldText: Record<string, string> = {
   margin_right_cm: '右边距',
   page_width_cm: '页面宽度',
   page_height_cm: '页面高度',
+  header_distance_cm: '页眉距边界',
+  footer_distance_cm: '页脚距边界',
+}
+
+const fieldUnitText: Record<string, string> = {
+  fontSizePt: 'pt',
+  firstLineIndentCm: 'cm',
+  spaceBeforePt: 'pt',
+  spaceAfterPt: 'pt',
+  font_size_pt: 'pt',
+  first_line_indent_cm: 'cm',
+  space_before_pt: 'pt',
+  space_after_pt: 'pt',
+  margin_top_cm: 'cm',
+  margin_bottom_cm: 'cm',
+  margin_left_cm: 'cm',
+  margin_right_cm: 'cm',
+  page_width_cm: 'cm',
+  page_height_cm: 'cm',
+  header_distance_cm: 'cm',
+  footer_distance_cm: 'cm',
 }

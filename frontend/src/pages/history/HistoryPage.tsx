@@ -7,6 +7,14 @@ import { StatusBadge } from '@/shared/ui/StatusBadge'
 
 const PAGE_SIZE = 20
 
+function taskDocumentLabel(task: { document_filename?: string | null; document_id: string }) {
+  return task.document_filename || `历史文档 ${task.document_id.slice(0, 12)}`
+}
+
+function taskRuleSetLabel(task: { ruleset_name?: string | null; ruleset_id: string }) {
+  return task.ruleset_name || `历史规则集 ${task.ruleset_id.slice(0, 12)}`
+}
+
 export function HistoryPage() {
   const [offset, setOffset] = useState(0)
   const { data: tasks = [], isLoading, isError } = useCheckTasksQuery({
@@ -53,7 +61,55 @@ export function HistoryPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-neutral-200 md:hidden">
+              {tasks.map((task) => (
+                <article key={task.id} className="px-5 py-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-sm font-medium text-neutral-950">
+                            {taskDocumentLabel(task)}
+                          </h2>
+                          <p className="mt-1 truncate text-xs text-neutral-500">
+                            {taskRuleSetLabel(task)}
+                          </p>
+                        </div>
+                        <StatusBadge status={task.status} />
+                      </div>
+                      <p className="mt-2 text-xs text-neutral-400">
+                        更新于 {new Date(task.updated_at).toLocaleString()}
+                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        {task.report_id ? (
+                          <Link to={`/reports/${task.report_id}`} className="text-sm text-primary-600 hover:underline">
+                            查看报告
+                          </Link>
+                        ) : (
+                          <Link to={`/checks/${task.id}/progress`} className="text-sm text-primary-600 hover:underline">
+                            查看进度
+                          </Link>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deleteTask(task.id)}
+                          disabled={deleteTaskMutation.isPending}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="删除历史任务"
+                          title="删除历史任务"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead className="bg-neutral-50">
                 <tr>
@@ -83,15 +139,15 @@ export function HistoryPage() {
                           <FileText className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="font-medium text-neutral-900">{task.id}</div>
-                          <div className="text-xs text-neutral-400">{task.document_id}</div>
+                          <div className="font-medium text-neutral-900">{taskDocumentLabel(task)}</div>
+                          <div className="text-xs text-neutral-400">{task.id}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-5 py-4">
                       <StatusBadge status={task.status} />
                     </td>
-                    <td className="px-5 py-4 text-neutral-700">{task.ruleset_id}</td>
+                    <td className="px-5 py-4 text-neutral-700">{taskRuleSetLabel(task)}</td>
                     <td className="px-5 py-4 text-neutral-500">
                       {new Date(task.updated_at).toLocaleString()}
                     </td>

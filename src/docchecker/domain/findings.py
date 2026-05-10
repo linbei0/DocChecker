@@ -8,6 +8,8 @@ from docchecker.domain.enums import Certainty, RuleCategory, Severity
 class FindingLocation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    story: str | None = None
+    part_name: str | None = None
     section_path: str | None = None
     display_path: str | None = None
     paragraph_number: int | None = None
@@ -16,6 +18,7 @@ class FindingLocation(BaseModel):
     table_index: int | None = None
     row_index: int | None = None
     column_index: int | None = None
+    cell_paragraph_index: int | None = None
     area: str | None = None
     xml_path: str | None = None
 
@@ -52,6 +55,8 @@ class CheckReport(BaseModel):
     id: str
     document_id: str
     ruleset_id: str
+    document_filename: str | None = None
+    ruleset_name: str | None = None
     checker_version: str
     generated_at: str
     findings: list[CheckFinding]

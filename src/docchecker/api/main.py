@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Timer
 from typing import Annotated
 from uuid import uuid4
 
@@ -225,7 +226,9 @@ def delete_ruleset(ruleset_id: str) -> dict[str, bool | str]:
 
 
 @app.post("/api/draft-rulesets", response_model=DraftRuleSet)
-def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
+def create_draft_ruleset(
+    request: CreateDraftRuleSetRequest,
+) -> DraftRuleSet:
     document = state_store.get_document(request.document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在。")
@@ -241,6 +244,7 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
         extraction_summary = ExtractionSummary(structured_rules=len(rules))
         unsupported_requirements: list[UnsupportedRequirement] = []
         name = f"{template.name} 副本"
+        extraction_trace = None
     else:
         text = request.manual_text or ""
         if request.source_type == SourceType.requirement_doc:
@@ -249,19 +253,25 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
             )
             if not requirement_document:
                 raise HTTPException(status_code=404, detail="规范文档不存在。")
-            text = requirement_document.extracted_text
+            draft = DraftRuleSet(
+                id=f"draft_{uuid4().hex}",
+                name="候选规则集",
+                document_id=request.document_id,
+                source_type=request.source_type,
+                parse_warnings=["规则抽取正在后台执行，请稍后刷新。"],
+                status=DraftRuleSetStatus.processing,
+                created_at=now,
+                updated_at=now,
+            )
+            state_store.save_draft_ruleset(draft)
+            _start_background_job(
+                _execute_draft_ruleset_extraction,
+                draft.id,
+                requirement_document.id,
+            )
+            return draft
         try:
-            if request.source_type == SourceType.requirement_doc:
-                result = extract_rules_from_requirement_document(
-                    RequirementDocumentModel(
-                        source_filename=requirement_document.filename,
-                        blocks=requirement_document.blocks,
-                        markdown=requirement_document.extracted_text,
-                    ),
-                    source_type=request.source_type,
-                )
-            else:
-                result = extract_rules_from_text(text, source_type=request.source_type)
+            result = extract_rules_from_text(text, source_type=request.source_type)
         except RuleExtractionConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         rules = result.rules
@@ -290,6 +300,58 @@ def create_draft_ruleset(request: CreateDraftRuleSetRequest) -> DraftRuleSet:
     return draft
 
 
+def _execute_draft_ruleset_extraction(draft_id: str, requirement_document_id: str) -> None:
+    draft = state_store.get_draft_ruleset(draft_id)
+    requirement_document = state_store.get_requirement_document(requirement_document_id)
+    if not draft or not requirement_document:
+        return
+
+    try:
+        result = extract_rules_from_requirement_document(
+            RequirementDocumentModel(
+                source_filename=requirement_document.filename,
+                blocks=requirement_document.blocks,
+                markdown=requirement_document.extracted_text,
+            ),
+            source_type=SourceType.requirement_doc,
+        )
+        updated = draft.model_copy(
+            update={
+                "rules": result.rules,
+                "suggested_rules": result.suggested_rules,
+                "parse_warnings": result.parse_warnings,
+                "extraction_summary": result.extraction_summary,
+                "unsupported_requirements": result.unsupported_requirements,
+                "extraction_trace": result.extraction_trace,
+                "status": DraftRuleSetStatus.draft,
+                "error": None,
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+    except RuleExtractionConfigurationError as exc:
+        updated = draft.model_copy(
+            update={
+                "parse_warnings": [],
+                "status": DraftRuleSetStatus.failed,
+                "error": str(exc),
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+    except Exception as exc:
+        updated = draft.model_copy(
+            update={
+                "parse_warnings": [],
+                "status": DraftRuleSetStatus.failed,
+                "error": str(exc),
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+    state_store.save_draft_ruleset(updated)
+
+
 @app.get("/api/draft-rulesets/{draft_id}", response_model=DraftRuleSet)
 def get_draft_ruleset(draft_id: str) -> DraftRuleSet:
     draft = state_store.get_draft_ruleset(draft_id)
@@ -301,6 +363,10 @@ def get_draft_ruleset(draft_id: str) -> DraftRuleSet:
 @app.patch("/api/draft-rulesets/{draft_id}", response_model=DraftRuleSet)
 def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> DraftRuleSet:
     draft = get_draft_ruleset(draft_id)
+    if draft.status == DraftRuleSetStatus.processing:
+        raise HTTPException(status_code=409, detail="候选规则仍在生成中，请稍后再编辑。")
+    if draft.status == DraftRuleSetStatus.failed:
+        raise HTTPException(status_code=400, detail=draft.error or "候选规则生成失败。")
     if draft.status == DraftRuleSetStatus.published:
         raise HTTPException(status_code=400, detail="已发布的候选规则集不能继续编辑。")
     updated = draft.model_copy(
@@ -324,6 +390,10 @@ def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> D
 @app.post("/api/draft-rulesets/{draft_id}/publish", response_model=RuleSet)
 def publish_draft_ruleset(draft_id: str) -> RuleSet:
     draft = get_draft_ruleset(draft_id)
+    if draft.status == DraftRuleSetStatus.processing:
+        raise HTTPException(status_code=409, detail="候选规则仍在生成中，请稍后再发布。")
+    if draft.status == DraftRuleSetStatus.failed:
+        raise HTTPException(status_code=400, detail=draft.error or "候选规则生成失败。")
     ruleset = RuleSet(
         id=f"ruleset_{uuid4().hex}",
         name=draft.name,
@@ -350,7 +420,9 @@ def publish_draft_ruleset(draft_id: str) -> RuleSet:
 
 
 @app.post("/api/check-tasks", response_model=CheckTask)
-def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
+def create_check_task(
+    request: CreateCheckTaskRequest,
+) -> CheckTask:
     document = state_store.get_document(request.document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在。")
@@ -361,32 +433,63 @@ def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
         id=f"task_{uuid4().hex}",
         document_id=request.document_id,
         ruleset_id=request.ruleset_id,
-        status=TaskStatus.running,
+        document_filename=document.filename,
+        ruleset_name=ruleset.name,
+        status=TaskStatus.pending,
         created_at=_now(),
         updated_at=_now(),
     )
     state_store.save_check_task(task)
+    _start_background_job(_execute_check_task, task.id)
+    return task
+
+
+def _start_background_job(function, *args) -> None:
+    # 先让 HTTP 响应写出，再启动 CPU 密集的文档解析，避免新线程抢占 GIL 拖慢首包。
+    worker = Timer(0.1, function, args=args)
+    worker.daemon = True
+    worker.start()
+
+
+def _execute_check_task(task_id: str) -> None:
+    task = state_store.get_check_task(task_id)
+    if not task:
+        return
+    document = state_store.get_document(task.document_id)
+    ruleset = state_store.get_ruleset(task.ruleset_id)
+    if not document or not ruleset:
+        failed = task.model_copy(
+            update={
+                "status": TaskStatus.failed,
+                "error": "文档或规则集不存在，无法执行检查。",
+                "updated_at": _now(),
+            }
+        )
+        state_store.save_check_task(failed)
+        return
+    running = task.model_copy(update={"status": TaskStatus.running, "updated_at": _now()})
+    state_store.save_check_task(running)
     service = CheckService(settings, storage)
     try:
         report = service.check_document(
             Path(document.path),
-            document_id=request.document_id,
+            document_id=task.document_id,
             filename=document.filename,
             ruleset=ruleset,
         )
     except DocumentValidationError as exc:
-        failed = task.model_copy(
+        failed = running.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
         state_store.save_check_task(failed)
-        return failed
+        return
     except Exception as exc:
-        failed = task.model_copy(
+        failed = running.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
         state_store.save_check_task(failed)
-        return failed
-    succeeded = task.model_copy(
+        return
+    succeeded = running.model_copy(
         update={"status": TaskStatus.succeeded, "report_id": report.id, "updated_at": _now()}
     )
     try:
@@ -398,12 +501,11 @@ def create_check_task(request: CreateCheckTaskRequest) -> CheckTask:
         )
     except Exception as exc:
         storage.report_path(report.id).unlink(missing_ok=True)
-        failed = task.model_copy(
+        failed = running.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
         state_store.save_check_task(failed)
-        return failed
-    return succeeded
+        return
 
 
 @app.get("/api/check-tasks", response_model=list[CheckTask])

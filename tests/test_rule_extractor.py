@@ -483,12 +483,63 @@ def test_hybrid_mode_rejects_invalid_llm_candidate_schema(
     issue = result.extraction_trace.issues[0]
     assert issue.reason_code == "invalid_llm_response"
     assert issue.message == (
-        "LLM 返回的规则候选格式不符合系统 schema，"
-        "已拒绝本次 LLM 候选；本地规则抽取结果仍可使用。"
+        "LLM 返回的第 1 批规则候选格式不符合系统 schema，"
+        "已拒绝本批候选；本地规则抽取结果仍可使用。"
     )
     assert issue.excerpt is not None
     assert "abstract_word_count" in issue.excerpt
     assert "validation errors" not in issue.message
+
+
+def test_hybrid_mode_processes_requirement_blocks_in_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOC_CHECKER_RULE_EXTRACTOR_MODE", "hybrid")
+    monkeypatch.setenv("DOC_CHECKER_LLM_API_BASE", "https://llm.example.test")
+    monkeypatch.setenv("DOC_CHECKER_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("DOC_CHECKER_LLM_MODEL", "test-model")
+
+    from docchecker.core.config import get_settings
+
+    get_settings.cache_clear()
+    batch_sizes: list[int] = []
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {"choices": [{"message": {"content": json.dumps({"rule_candidates": []})}}]},
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: int) -> FakeResponse:
+        assert timeout == 60
+        payload = json.loads(request.data.decode("utf-8"))
+        user_message = payload["messages"][1]["content"]
+        batch_sizes.append(len(json.loads(user_message)["requirement_blocks"]))
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "docchecker.services.rule_extractor.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    try:
+        result = extract_rules_from_text(
+            "\n".join(f"第 {index} 条规范要求暂不支持。" for index in range(81)),
+            source_type=SourceType.requirement_doc,
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert batch_sizes == [80, 1]
+    assert result.extraction_trace is not None
+    assert result.extraction_trace.stats.processed_block_count == 81
+    assert result.extraction_trace.stats.batch_count == 2
 
 
 def test_hybrid_mode_drops_unsupported_llm_expectation_fields(

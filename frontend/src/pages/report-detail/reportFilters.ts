@@ -94,12 +94,44 @@ export function findingFieldLabel(finding: CheckFinding) {
 export function formatFindingValue(values: Record<string, unknown>) {
   const entries = Object.entries(values)
   if (entries.length === 0) return '-'
-  return entries.map(([key, value]) => `${key}: ${formatValue(value)}`).join('，')
+  return entries.map(([key, value]) => `${fieldLabel(key)}: ${formatValue(key, value)}`).join('，')
 }
 
-function formatValue(value: unknown): string {
+function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined) return '未解析'
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
+  const unit = fieldMeta[key]?.unit
+  return unit ? `${String(value)} ${unit}` : String(value)
+}
+
+function fieldLabel(key: string) {
+  return fieldMeta[key]?.label || key
+}
+
+const fieldMeta: Record<string, { label: string; unit?: string }> = {
+  fontFamilyEastAsia: { label: '中文字体' },
+  fontFamilyAscii: { label: '英文字体' },
+  fontSizePt: { label: '字号', unit: 'pt' },
+  bold: { label: '加粗' },
+  alignment: { label: '对齐方式' },
+  firstLineIndentCm: { label: '首行缩进', unit: 'cm' },
+  lineSpacing: { label: '行距' },
+  spaceBeforePt: { label: '段前间距', unit: 'pt' },
+  spaceAfterPt: { label: '段后间距', unit: 'pt' },
+  textContains: { label: '必须包含文本' },
+  requiresPageNumber: { label: '必须包含页码' },
+  captionPattern: { label: '题注编号格式' },
+  requiresTableCaption: { label: '表格题注' },
+  requiresFigureCaption: { label: '图片题注' },
+  tableCaptionPosition: { label: '表题位置' },
+  figureCaptionPosition: { label: '图题位置' },
+  page_width_cm: { label: '页面宽度', unit: 'cm' },
+  page_height_cm: { label: '页面高度', unit: 'cm' },
+  margin_top_cm: { label: '上边距', unit: 'cm' },
+  margin_bottom_cm: { label: '下边距', unit: 'cm' },
+  margin_left_cm: { label: '左边距', unit: 'cm' },
+  margin_right_cm: { label: '右边距', unit: 'cm' },
+  header_distance_cm: { label: '页眉距边界', unit: 'cm' },
+  footer_distance_cm: { label: '页脚距边界', unit: 'cm' },
 }

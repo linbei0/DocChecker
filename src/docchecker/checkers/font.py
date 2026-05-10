@@ -174,6 +174,7 @@ def _is_caption_paragraph(paragraph: ParagraphNode) -> bool:
 def _field_name(field: str) -> str:
     return {
         "fontFamilyEastAsia": "font_family",
+        "fontFamilyAscii": "font_family_ascii",
         "fontSizePt": "font_size_pt",
         "spaceBeforePt": "space_before_pt",
         "spaceAfterPt": "space_after_pt",
@@ -181,6 +182,12 @@ def _field_name(field: str) -> str:
 
 
 def _actual_value(paragraph: ParagraphNode, field: str, expected, scope: str = ""):
+    if field == "fontFamilyAscii":
+        return (
+            paragraph.font_family_ascii
+            or _mixed_font_value(paragraph.raw.get("font_family_ascii_values"))
+            or paragraph.font_family
+        )
     if field == "fontFamilyEastAsia":
         if scope.startswith("keywords"):
             return _keyword_font_value(paragraph, expected)

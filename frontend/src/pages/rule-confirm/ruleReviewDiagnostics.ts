@@ -53,8 +53,12 @@ export function buildFeedbackGroups(
 export function buildTraceDiagnosis(trace: RuleExtractionTrace | null | undefined): string[] {
   if (!trace?.stats) return []
   const items: string[] = []
-  if (trace.stats.llm_rejected_count > 0) {
-    items.push('LLM 输出被 schema 拒绝，优先检查 prompt 约束和返回 JSON 结构。')
+  const rejectedCount = trace.stats.rejected_candidate_count ?? trace.stats.llm_rejected_count
+  if ((trace.stats.batch_count ?? 0) > 1) {
+    items.push('规范块已分批处理，若某批异常可回到 extraction trace 定位具体批次。')
+  }
+  if (rejectedCount > 0) {
+    items.push('存在候选被拒绝，优先检查 prompt 约束、返回 JSON 结构和证据来源。')
   }
   if (trace.stats.unsupported_field_count > 0) {
     items.push('存在 unsupported field，优先补 capability manifest 或 checker 字段 resolver。')

@@ -30,6 +30,8 @@ export function AppShell() {
                   <Link
                     key={item.to}
                     to={item.to}
+                    aria-label={item.label}
+                    title={item.label}
                     className={cn(
                       'flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                       isActive

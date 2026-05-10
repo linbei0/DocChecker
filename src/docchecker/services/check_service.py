@@ -33,6 +33,8 @@ class CheckService:
             id=f"report_{uuid4().hex}",
             document_id=document_id,
             ruleset_id=ruleset.id,
+            document_filename=filename,
+            ruleset_name=ruleset.name,
             checker_version=self.settings.checker_version,
             generated_at=datetime.now(UTC).isoformat(),
             findings=findings,

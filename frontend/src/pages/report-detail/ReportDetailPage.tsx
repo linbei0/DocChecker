@@ -145,7 +145,9 @@ export function ReportDetailPage() {
           </Link>
           <div>
             <h1 className="text-2xl font-semibold text-neutral-950">检查报告</h1>
-            <p className="mt-1 text-sm text-neutral-500">{report.document_id}</p>
+            <p className="mt-1 text-sm text-neutral-500">
+              {report.document_filename || `历史文档 ${report.document_id}`}
+            </p>
           </div>
         </div>
         <Button
@@ -167,6 +169,7 @@ export function ReportDetailPage() {
               checkerVersion={report.checker_version}
               generatedAt={report.generated_at}
               rulesetId={report.ruleset_id}
+              rulesetName={report.ruleset_name}
             />
           </section>
 
@@ -325,10 +328,12 @@ function DistributionPanel({
 
 function ScopePanel({
   rulesetId,
+  rulesetName,
   checkerVersion,
   generatedAt,
 }: {
   rulesetId: string
+  rulesetName?: string | null
   checkerVersion?: string
   generatedAt?: string
 }) {
@@ -339,7 +344,7 @@ function ScopePanel({
         <p className="text-sm font-medium text-neutral-950">检查范围</p>
       </div>
       <dl className="space-y-3 text-sm">
-        <InfoLine label="规则集" value={rulesetId} />
+        <InfoLine label="规则集" value={rulesetName || `历史规则集 ${rulesetId}`} />
         <InfoLine label="检查器版本" value={checkerVersion || '-'} />
         <InfoLine
           label="检查时间"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CheckFinding } from '@/entities/finding/model'
-import { filterFindings, groupFindingsByFragment } from './reportFilters'
+import { filterFindings, formatFindingValue, groupFindingsByFragment } from './reportFilters'
 
 function finding(
   id: string,
@@ -76,5 +76,16 @@ describe('filterFindings', () => {
     expect(groups[0].title).toBe('绪论 / 第 3 段')
     expect(groups[0].findings.map((item) => item.id)).toEqual(['font-1', 'paragraph-1'])
     expect(groups[1].title).toBe('第 10 段')
+  })
+
+  it('formats internal fields with readable labels and units', () => {
+    expect(
+      formatFindingValue({
+        fontFamilyEastAsia: '宋体',
+        fontFamilyAscii: 'Times New Roman',
+        fontSizePt: 12,
+        firstLineIndentCm: 0.74,
+      }),
+    ).toBe('中文字体: 宋体，英文字体: Times New Roman，字号: 12 pt，首行缩进: 0.74 cm')
   })
 })

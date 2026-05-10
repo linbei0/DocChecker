@@ -42,6 +42,7 @@ class HeaderFooterChecker:
                 )
             for field, actual_key in [
                 ("fontFamilyEastAsia", "font_family_east_asia"),
+                ("fontFamilyAscii", "font_family_ascii"),
                 ("fontSizePt", "font_size_pt"),
             ]:
                 expected = rule.expectation.get(field)

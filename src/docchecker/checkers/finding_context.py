@@ -8,6 +8,7 @@ MAX_EXCERPT_LENGTH = 96
 
 FIELD_LABELS = {
     "fontFamilyEastAsia": "中文字体",
+    "fontFamilyAscii": "英文字体",
     "fontSizePt": "字号",
     "bold": "加粗",
     "firstLineIndentCm": "首行缩进",
@@ -30,17 +31,28 @@ def paragraph_location(paragraph: ParagraphNode) -> FindingLocation:
     section_name = paragraph.raw.get("section_name")
     if not isinstance(section_name, str) or not section_name.strip():
         section_name = None
-    display_path = (
-        f"{section_name} / 第 {paragraph_number} 段"
-        if section_name
-        else f"第 {paragraph_number} 段"
-    )
+    display_parts = [section_name] if section_name else []
+    if paragraph.table_index is not None:
+        table_number = paragraph.table_index + 1
+        row_number = (paragraph.row_index or 0) + 1
+        column_number = (paragraph.column_index or 0) + 1
+        display_parts.append(f"表 {table_number} 第 {row_number} 行第 {column_number} 列")
+        if paragraph.cell_paragraph_index is not None:
+            display_parts.append(f"单元格第 {paragraph.cell_paragraph_index + 1} 段")
+    display_parts.append(f"第 {paragraph_number} 段")
+    display_path = " / ".join(display_parts)
     return FindingLocation(
+        story=paragraph.story,
+        part_name=paragraph.part_name,
         section_path=section_name,
         display_path=display_path,
         paragraph_number=paragraph_number,
         section_name=section_name,
         paragraph_index=paragraph.index,
+        table_index=paragraph.table_index,
+        row_index=paragraph.row_index,
+        column_index=paragraph.column_index,
+        cell_paragraph_index=paragraph.cell_paragraph_index,
     )
 
 
@@ -56,6 +68,12 @@ def paragraph_context(
     next_text = _nearby_text(document, paragraph.index, direction=1)
     return {
         "style_name": paragraph.style_name,
+        "story": paragraph.story,
+        "part_name": paragraph.part_name,
+        "table_index": paragraph.table_index,
+        "row_index": paragraph.row_index,
+        "column_index": paragraph.column_index,
+        "cell_paragraph_index": paragraph.cell_paragraph_index,
         "field_label": FIELD_LABELS.get(field, field),
         "before_text": paragraph_excerpt(previous_text) if previous_text else None,
         "after_text": paragraph_excerpt(next_text) if next_text else None,

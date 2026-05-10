@@ -41,5 +41,7 @@ class TaskStatus(StrEnum):
 
 
 class DraftRuleSetStatus(StrEnum):
+    processing = "processing"
     draft = "draft"
     published = "published"
+    failed = "failed"

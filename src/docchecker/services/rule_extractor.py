@@ -23,6 +23,8 @@ from docchecker.domain.rules import (
 )
 from docchecker.services.rule_compiler import compile_rule_candidates
 
+LLM_REQUIREMENT_BLOCK_BATCH_SIZE = 80
+
 
 @dataclass(frozen=True)
 class RuleExtractionResult:
@@ -143,6 +145,8 @@ def _extract_rules_from_chunks(
     issues: list[RuleExtractionIssue] = []
     llm_candidate_count = 0
     llm_rejected_count = 0
+    processed_block_count = len(blocks) if blocks is not None else len(chunks)
+    batch_count = 1 if processed_block_count else 0
     if settings.rule_extractor_mode == "hybrid":
         llm_candidates, llm_issues, llm_stats = _llm_rule_candidates(
             blocks or _blocks_from_chunks(chunks)
@@ -151,6 +155,8 @@ def _extract_rules_from_chunks(
         issues.extend(llm_issues)
         llm_candidate_count = llm_stats.llm_candidate_count
         llm_rejected_count = llm_stats.llm_rejected_count
+        processed_block_count = llm_stats.processed_block_count
+        batch_count = llm_stats.batch_count
 
     extracted_rules: list[FormatRule] = []
     extracted_rules.extend(_extract_body_font_rules(chunks, source_type))
@@ -186,9 +192,12 @@ def _extract_rules_from_chunks(
     )
     conflict_count = len([issue for issue in conflict_issues if "冲突" in issue.message])
     stats = RuleExtractionStats(
+        processed_block_count=processed_block_count,
+        batch_count=batch_count,
         local_candidate_count=len(local_candidates),
         llm_candidate_count=llm_candidate_count,
         llm_rejected_count=llm_rejected_count,
+        rejected_candidate_count=llm_rejected_count,
         unsupported_field_count=compilation.unsupported_field_count,
         conflict_count=conflict_count,
         auto_checkable_candidate_count=compilation.auto_checkable_candidate_count,
@@ -915,8 +924,79 @@ def _llm_rule_candidates(
             "DOC_CHECKER_LLM_API_BASE、DOC_CHECKER_LLM_API_KEY、DOC_CHECKER_LLM_MODEL。"
         )
 
-    payload = {
-        "model": settings.llm_model,
+    valid_candidates: list[ExtractedRuleCandidate] = []
+    issues: list[RuleExtractionIssue] = []
+    rejected_count = 0
+    batches = list(_batched(blocks, LLM_REQUIREMENT_BLOCK_BATCH_SIZE))
+    for batch_index, batch in enumerate(batches, start=1):
+        payload = _llm_payload(settings.llm_model, batch)
+        request = urllib.request.Request(
+            settings.llm_api_base.rstrip("/") + "/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.llm_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            issues.append(
+                RuleExtractionIssue(
+                    reason_code="invalid_llm_response",
+                    message=f"LLM 规则抽取第 {batch_index} 批调用失败：{exc}",
+                )
+            )
+            rejected_count += 1
+            break
+
+        content = response_payload["choices"][0]["message"]["content"]
+        try:
+            parsed = json.loads(content)
+            candidates = TypeAdapter(list[ExtractedRuleCandidate]).validate_python(
+                parsed.get("rule_candidates", [])
+            )
+        except (KeyError, TypeError, json.JSONDecodeError, ValidationError):
+            issues.append(
+                RuleExtractionIssue(
+                    reason_code="invalid_llm_response",
+                    message=(
+                        f"LLM 返回的第 {batch_index} 批规则候选格式不符合系统 schema，"
+                        "已拒绝本批候选；本地规则抽取结果仍可使用。"
+                    ),
+                    excerpt=str(content)[:300],
+                )
+            )
+            rejected_count += 1
+            continue
+        for candidate in candidates:
+            if candidate.evidence_span.strip():
+                valid_candidates.append(candidate)
+                continue
+            rejected_count += 1
+            issues.append(
+                RuleExtractionIssue(
+                    location=candidate.location,
+                    category=candidate.category,
+                    reason_code="ambiguous_requirement",
+                    message="LLM 候选缺少原文证据，已拒绝映射为规则。",
+                    excerpt=str(candidate.model_dump())[:300],
+                )
+            )
+    return valid_candidates, issues, RuleExtractionStats(
+        processed_block_count=len(blocks),
+        batch_count=len(batches),
+        llm_candidate_count=len(valid_candidates),
+        llm_rejected_count=rejected_count,
+        rejected_candidate_count=rejected_count,
+    )
+
+
+def _llm_payload(model: str, blocks: list[RequirementBlock]) -> dict[str, object]:
+    return {
+        "model": model,
         "messages": [
             {
                 "role": "system",
@@ -953,7 +1033,7 @@ def _llm_rule_candidates(
                 "content": json.dumps(
                     {
                         "capability_manifest": capability_manifest(),
-                        "requirement_blocks": [block.model_dump() for block in blocks[:80]],
+                        "requirement_blocks": [block.model_dump() for block in blocks],
                     },
                     ensure_ascii=False,
                 ),
@@ -962,59 +1042,13 @@ def _llm_rule_candidates(
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
-    request = urllib.request.Request(
-        settings.llm_api_base.rstrip("/") + "/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {settings.llm_api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return [], [
-            RuleExtractionIssue(
-                reason_code="invalid_llm_response",
-                message=f"LLM 规则抽取调用失败：{exc}",
-            )
-        ], RuleExtractionStats(llm_rejected_count=1)
 
-    content = response_payload["choices"][0]["message"]["content"]
-    try:
-        parsed = json.loads(content)
-        candidates = TypeAdapter(list[ExtractedRuleCandidate]).validate_python(
-            parsed.get("rule_candidates", [])
-        )
-    except (KeyError, TypeError, json.JSONDecodeError, ValidationError):
-        return [], [
-            RuleExtractionIssue(
-                reason_code="invalid_llm_response",
-                message=(
-                    "LLM 返回的规则候选格式不符合系统 schema，"
-                    "已拒绝本次 LLM 候选；本地规则抽取结果仍可使用。"
-                ),
-                excerpt=str(content)[:300],
-            )
-        ], RuleExtractionStats(llm_rejected_count=1)
-    issues = [
-        RuleExtractionIssue(
-            location=candidate.location,
-            category=candidate.category,
-            reason_code="ambiguous_requirement",
-            message="LLM 候选缺少原文证据，已拒绝映射为规则。",
-            excerpt=str(candidate.model_dump())[:300],
-        )
-        for candidate in candidates
-        if not candidate.evidence_span.strip()
-    ]
-    valid_candidates = [candidate for candidate in candidates if candidate.evidence_span.strip()]
-    return valid_candidates, issues, RuleExtractionStats(
-        llm_candidate_count=len(valid_candidates),
-        llm_rejected_count=len(candidates) - len(valid_candidates),
-    )
+
+def _batched(
+    blocks: list[RequirementBlock],
+    size: int,
+) -> list[list[RequirementBlock]]:
+    return [blocks[index : index + size] for index in range(0, len(blocks), size)]
 
 
 def _blocks_from_chunks(chunks: list[RequirementChunk]) -> list[RequirementBlock]:

@@ -9,6 +9,8 @@ class CheckTask(BaseModel):
     id: str
     document_id: str
     ruleset_id: str
+    document_filename: str | None = None
+    ruleset_name: str | None = None
     status: TaskStatus
     report_id: str | None = None
     error: str | None = None

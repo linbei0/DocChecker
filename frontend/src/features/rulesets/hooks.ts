@@ -66,6 +66,7 @@ export function useDraftRuleSetQuery(draftId: string) {
     queryKey: queryKeys.draftRulesets.detail(draftId),
     queryFn: () => getDraftRuleSet(draftId),
     enabled: !!draftId,
+    refetchInterval: (query) => (query.state.data?.status === 'processing' ? 1500 : false),
   })
 }
 

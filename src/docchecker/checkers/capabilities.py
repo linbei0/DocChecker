@@ -49,13 +49,18 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
     ),
     CheckerCapability(
         category=RuleCategory.font,
-        fields=frozenset({"fontFamilyEastAsia", "fontSizePt", "bold"}),
+        fields=frozenset({"fontFamilyEastAsia", "fontFamilyAscii", "fontSizePt", "bold"}),
         field_descriptions={
             "fontFamilyEastAsia": "中文字体名称，例如宋体、黑体。",
+            "fontFamilyAscii": "英文/数字字体名称，例如 Times New Roman。",
             "fontSizePt": "字号，单位磅；小四应转换为 12。",
             "bold": "是否加粗。",
         },
-        example_expectation={"fontFamilyEastAsia": "宋体", "fontSizePt": 12},
+        example_expectation={
+            "fontFamilyEastAsia": "宋体",
+            "fontFamilyAscii": "Times New Roman",
+            "fontSizePt": 12,
+        },
     ),
     CheckerCapability(
         category=RuleCategory.paragraph,
@@ -67,6 +72,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
                 "spaceBeforePt",
                 "spaceAfterPt",
                 "fontFamilyEastAsia",
+                "fontFamilyAscii",
                 "fontSizePt",
             }
         ),
@@ -77,6 +83,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
             "spaceBeforePt": "段前间距，单位磅。",
             "spaceAfterPt": "段后间距，单位磅。",
             "fontFamilyEastAsia": "段落中文字体名称。",
+            "fontFamilyAscii": "段落英文/数字字体名称。",
             "fontSizePt": "段落字号，单位磅。",
         },
         example_expectation={"lineSpacing": 1.5, "firstLineIndentCm": 0.74},
@@ -86,6 +93,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
         fields=frozenset(
             {
                 "fontFamilyEastAsia",
+                "fontFamilyAscii",
                 "fontSizePt",
                 "bold",
                 "alignment",
@@ -96,6 +104,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
         scope_prefixes=("heading", "title", "cover.title"),
         field_descriptions={
             "fontFamilyEastAsia": "标题中文字体名称。",
+            "fontFamilyAscii": "标题英文/数字字体名称。",
             "fontSizePt": "标题字号，单位磅。",
             "bold": "标题是否加粗。",
             "alignment": "标题对齐方式。",
@@ -111,6 +120,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
                 "textContains",
                 "requiresPageNumber",
                 "fontFamilyEastAsia",
+                "fontFamilyAscii",
                 "fontSizePt",
             }
         ),
@@ -119,6 +129,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
             "textContains": "页眉或页脚必须包含的文本片段。",
             "requiresPageNumber": "页眉或页脚是否必须包含页码域或页码文本。",
             "fontFamilyEastAsia": "页眉页脚中文字体名称。",
+            "fontFamilyAscii": "页眉页脚英文/数字字体名称。",
             "fontSizePt": "页眉页脚字号，单位磅。",
         },
         example_expectation={"requiresPageNumber": True, "fontSizePt": 10.5},
@@ -131,6 +142,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
                 "requiresTableCaption",
                 "tableCaptionPosition",
                 "fontFamilyEastAsia",
+                "fontFamilyAscii",
                 "fontSizePt",
                 "alignment",
             }
@@ -141,6 +153,7 @@ CHECKER_CAPABILITIES: tuple[CheckerCapability, ...] = (
             "requiresTableCaption": "每个表格是否必须有表题。",
             "tableCaptionPosition": "表题相对表格的位置：before 或 after。",
             "fontFamilyEastAsia": "图题、表题中文字体名称。",
+            "fontFamilyAscii": "图题、表题英文/数字字体名称。",
             "fontSizePt": "图题、表题字号，单位磅。",
             "alignment": "图题、表题段落对齐方式。",
         },

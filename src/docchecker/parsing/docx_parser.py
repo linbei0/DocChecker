@@ -5,6 +5,8 @@ from zipfile import ZipFile
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 from docchecker.domain.document import (
     AbstractFact,
@@ -376,6 +378,62 @@ def _effective_format_sources(paragraph, default_font_name: str | None) -> dict[
     }
 
 
+ParagraphLocator = dict[str, str | int | None]
+
+
+def _iter_body_paragraph_contexts(document) -> list[tuple[Paragraph, ParagraphLocator]]:
+    contexts: list[tuple[Paragraph, ParagraphLocator]] = []
+    table_index = 0
+    for item in document.iter_inner_content():
+        if isinstance(item, Paragraph):
+            contexts.append((item, _paragraph_locator()))
+        elif isinstance(item, Table):
+            contexts.extend(_table_paragraph_contexts(item, table_index))
+            table_index += 1
+    return contexts
+
+
+def _table_paragraph_contexts(
+    table: Table,
+    table_index: int,
+) -> list[tuple[Paragraph, ParagraphLocator]]:
+    contexts: list[tuple[Paragraph, ParagraphLocator]] = []
+    for row_index, row in enumerate(table.rows):
+        for column_index, cell in enumerate(row.cells):
+            for cell_paragraph_index, paragraph in enumerate(cell.paragraphs):
+                contexts.append(
+                    (
+                        paragraph,
+                        _paragraph_locator(
+                            table_index=table_index,
+                            row_index=row_index,
+                            column_index=column_index,
+                            cell_paragraph_index=cell_paragraph_index,
+                        ),
+                    )
+                )
+            for nested_table in cell.tables:
+                contexts.extend(_table_paragraph_contexts(nested_table, table_index))
+    return contexts
+
+
+def _paragraph_locator(
+    *,
+    table_index: int | None = None,
+    row_index: int | None = None,
+    column_index: int | None = None,
+    cell_paragraph_index: int | None = None,
+) -> ParagraphLocator:
+    return {
+        "story": "body",
+        "part_name": "word/document.xml",
+        "table_index": table_index,
+        "row_index": row_index,
+        "column_index": column_index,
+        "cell_paragraph_index": cell_paragraph_index,
+    }
+
+
 def parse_docx(path: Path, *, document_id: str, source_filename: str) -> DocumentModel:
     package_parts: list[str]
     with ZipFile(path) as package:
@@ -405,14 +463,21 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
         for index, section in enumerate(document.sections)
     ]
 
+    body_paragraph_contexts = list(_iter_body_paragraph_contexts(document))
     paragraphs: list[ParagraphNode] = []
     current_section_name: str | None = None
-    for index, paragraph in enumerate(document.paragraphs):
+    for index, (paragraph, locator) in enumerate(body_paragraph_contexts):
         style_name = paragraph.style.name if paragraph.style else None
         text = paragraph.text
-        if _is_heading_style(style_name) and text.strip():
+        if (
+            locator["story"] == "body"
+            and locator["table_index"] is None
+            and (_is_heading_style(style_name) or _is_known_section_title(text))
+            and text.strip()
+        ):
             current_section_name = _compact_text(text, max_length=40)
         raw = {"section_name": current_section_name} if current_section_name else {}
+        raw.update({key: value for key, value in locator.items() if value is not None})
         raw["font_family_east_asia_values"] = _script_font_families(
             paragraph,
             default_font_name,
@@ -433,7 +498,13 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
             ParagraphNode(
                 index=index,
                 text=text,
+                story=str(locator["story"]),
+                part_name=str(locator["part_name"]),
                 style_name=style_name,
+                table_index=locator["table_index"],
+                row_index=locator["row_index"],
+                column_index=locator["column_index"],
+                cell_paragraph_index=locator["cell_paragraph_index"],
                 font_family=_font_family(paragraph, default_font_name),
                 font_family_east_asia=_script_font_family(
                     paragraph,
@@ -475,7 +546,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
     table_facts = _table_facts(document, paragraphs)
     field_facts = [
         fact
-        for index, paragraph in enumerate(document.paragraphs)
+        for index, (paragraph, _locator) in enumerate(body_paragraph_contexts)
         for fact in _field_facts(paragraph, index)
     ]
 
@@ -487,7 +558,7 @@ def parse_docx(path: Path, *, document_id: str, source_filename: str) -> Documen
         toc=_toc_fact(paragraphs, field_facts),
         numbering=[
             fact
-            for index, paragraph in enumerate(document.paragraphs)
+            for index, (paragraph, _locator) in enumerate(body_paragraph_contexts)
             if (fact := _numbering_fact(paragraph, index)) is not None
         ],
         fields=field_facts,
@@ -595,12 +666,13 @@ def _table_anchor_indices(document) -> dict[int, tuple[int | None, int | None]]:
     table_index = 0
     paragraph_index = 0
     block_order: list[tuple[str, int]] = []
-    for child in document.element.body.iterchildren():
-        if child.tag == qn("w:p"):
+    for item in document.iter_inner_content():
+        if isinstance(item, Paragraph):
             block_order.append(("paragraph", paragraph_index))
             paragraph_index += 1
-        elif child.tag == qn("w:tbl"):
+        elif isinstance(item, Table):
             block_order.append(("table", table_index))
+            paragraph_index += _table_body_paragraph_count(item)
             table_index += 1
     for block_position, (kind, index) in enumerate(block_order):
         if kind != "table":
@@ -623,6 +695,10 @@ def _table_anchor_indices(document) -> dict[int, tuple[int | None, int | None]]:
         )
         anchors[index] = (previous_paragraph, next_paragraph)
     return anchors
+
+
+def _table_body_paragraph_count(table: Table) -> int:
+    return sum(len(cell.paragraphs) for row in table.rows for cell in row.cells)
 
 
 def _table_caption(
@@ -970,6 +1046,15 @@ SECTION_ROLE_ALIASES = {
     "references": ("参考文献", "references", "bibliography"),
     "appendix": ("附录", "appendix"),
 }
+
+
+def _is_known_section_title(text: str) -> bool:
+    normalized = _normalize_section_text(text)
+    return any(
+        normalized == _normalize_section_text(alias)
+        for aliases in SECTION_ROLE_ALIASES.values()
+        for alias in aliases
+    )
 
 
 def _build_logical_sections(paragraphs: list[ParagraphNode]) -> list[LogicalSectionNode]:

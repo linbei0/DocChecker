@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from time import sleep
 
 import pytest
 from docx import Document
@@ -27,6 +28,19 @@ def _fake_prepare_doc_upload(path: Path, **kwargs) -> PreparedWordDocument:
         original_format=path.suffix.lower().lstrip("."),
         normalized_format="docx",
     )
+
+
+def _wait_for_json(client: TestClient, path: str, predicate, *, attempts: int = 100) -> dict:
+    last_payload: dict | None = None
+    for _ in range(attempts):
+        response = client.get(path)
+        assert response.status_code == 200
+        payload = response.json()
+        last_payload = payload
+        if predicate(payload):
+            return payload
+        sleep(0.05)
+    raise AssertionError(f"Timed out waiting for {path}: {last_payload}")
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +94,14 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     )
     assert task_response.status_code == 200
     task = task_response.json()
+    assert task["status"] == "pending"
+    assert task["document_filename"] == "paper.docx"
+    assert task["ruleset_name"] == "候选规则集"
+    task = _wait_for_json(
+        client,
+        f"/api/check-tasks/{task['id']}",
+        lambda payload: payload["status"] == "succeeded",
+    )
     assert task["status"] == "succeeded"
     assert task["report_id"]
 
@@ -105,6 +127,8 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     report_response = client.get(f"/api/reports/{task['report_id']}")
     assert report_response.status_code == 200
     assert report_response.json()["id"] == task["report_id"]
+    assert report_response.json()["document_filename"] == "paper.docx"
+    assert report_response.json()["ruleset_name"] == "候选规则集"
 
     draft_response = client.get(f"/api/draft-rulesets/{draft['id']}")
     assert draft_response.status_code == 200
@@ -148,6 +172,85 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     assert len(paged_ruleset_response.json()) <= 1
     assert client.delete(f"/api/rulesets/{ruleset_id}").status_code == 404
     assert client.delete(f"/api/check-tasks/{task['id']}").status_code == 404
+
+
+def test_requirement_document_draft_is_created_before_background_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docx_path = tmp_path / "paper.docx"
+    rules_path = tmp_path / "rules.docx"
+    _create_docx(docx_path, "正文内容")
+    _create_docx(rules_path, "正文宋体小四。")
+    client = TestClient(app)
+
+    def fake_extract_requirement_document(requirement_model, *, source_type):
+        return main.extract_rules_from_text("正文宋体小四。", source_type=source_type)
+
+    scheduled_jobs: list[tuple] = []
+
+    def capture_background_job(function, *args) -> None:
+        scheduled_jobs.append((function, args))
+
+    monkeypatch.setattr(
+        main,
+        "extract_rules_from_requirement_document",
+        fake_extract_requirement_document,
+    )
+    monkeypatch.setattr(main, "_start_background_job", capture_background_job)
+
+    with docx_path.open("rb") as file:
+        document_response = client.post(
+            "/api/documents",
+            files={
+                "file": (
+                    "paper.docx",
+                    file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+    document_id = document_response.json()["document_id"]
+
+    with rules_path.open("rb") as file:
+        requirement_response = client.post(
+            "/api/requirement-documents",
+            files={
+                "file": (
+                    "rules.docx",
+                    file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+    requirement_id = requirement_response.json()["id"]
+
+    draft_response = client.post(
+        "/api/draft-rulesets",
+        json={
+            "document_id": document_id,
+            "source_type": "requirement_doc",
+            "requirement_document_id": requirement_id,
+        },
+    )
+
+    assert draft_response.status_code == 200
+    draft = draft_response.json()
+    assert draft["status"] == "processing"
+    assert draft["rules"] == []
+    assert len(scheduled_jobs) == 1
+
+    function, args = scheduled_jobs[0]
+    function(*args)
+
+    persisted = _wait_for_json(
+        client,
+        f"/api/draft-rulesets/{draft['id']}",
+        lambda payload: payload["status"] == "draft",
+    )
+    assert persisted["status"] == "draft"
+    assert persisted["rules"]
+    assert persisted["error"] is None
 
 
 def test_upload_document_accepts_doc_after_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,8 +394,12 @@ def test_check_task_marks_failed_and_cleans_report_when_final_persistence_fails(
 
     assert task_response.status_code == 200
     task = task_response.json()
-    assert task["status"] == "failed"
-    assert task["error"] == "database unavailable"
+    assert task["status"] == "pending"
     assert list(main.storage.reports_dir.iterdir()) == []
-    persisted_task = client.get(f"/api/check-tasks/{task['id']}").json()
+    persisted_task = _wait_for_json(
+        client,
+        f"/api/check-tasks/{task['id']}",
+        lambda payload: payload["status"] == "failed",
+    )
     assert persisted_task["status"] == "failed"
+    assert persisted_task["error"] == "database unavailable"
