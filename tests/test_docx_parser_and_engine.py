@@ -275,6 +275,50 @@ def test_parse_docx_builds_phase4_high_frequency_facts(tmp_path: Path) -> None:
     assert model.facts.captions[0].position == "before"
 
 
+def test_parse_docx_counts_inline_abstract_content(tmp_path: Path) -> None:
+    path = tmp_path / "inline-abstract.docx"
+    document = Document()
+    document.add_paragraph("摘 要：本文研究论文格式检查系统，能够识别摘要正文。")
+    document.add_paragraph("关键词：论文；格式检查")
+    document.add_paragraph("1 绪论", style="Heading 1")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="inline-abstract.docx")
+
+    abstract = model.facts.abstracts[0]
+    assert abstract.language == "zh"
+    assert abstract.content_text == "本文研究论文格式检查系统，能够识别摘要正文。"
+    assert abstract.word_count > 0
+    assert abstract.has_keywords is True
+
+
+def test_chinese_abstract_word_count_rule_does_not_apply_to_english_abstract(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "abstract-language.docx"
+    document = Document()
+    document.add_paragraph("摘 要：本文研究格式检查。")
+    document.add_paragraph("关键词：论文；格式")
+    document.add_paragraph("Abstract: This paper studies format checking.")
+    document.add_paragraph("Keywords: paper; format")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="abstract-language.docx")
+    rule = FormatRule(
+        id="abstract_basic_requirements",
+        category=RuleCategory.abstract,
+        target=RuleTarget(scope="document.abstract", selector="中文摘要"),
+        expectation={"minWordCount": 300},
+        severity=Severity.major,
+        source=RuleSource(type=SourceType.requirement_doc, excerpt="中文摘要要求300字左右。"),
+    )
+
+    findings = CheckEngine().run(model, [rule])
+
+    assert len(findings) == 1
+    assert findings[0].location.display_path == "中文摘要"
+
+
 def test_parse_docx_resolves_east_asia_font_from_style_xml(tmp_path: Path) -> None:
     path = tmp_path / "heading-font.docx"
     document = Document()

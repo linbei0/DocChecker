@@ -833,7 +833,11 @@ def _reference_facts(
     if reference_section is None:
         candidate_paragraphs = paragraphs
     else:
-        end_index = reference_section.end_paragraph_index or paragraphs[-1].index
+        end_index = (
+            reference_section.end_paragraph_index
+            if reference_section.end_paragraph_index is not None
+            else paragraphs[-1].index
+        )
         candidate_paragraphs = [
             paragraph
             for paragraph in paragraphs
@@ -874,12 +878,29 @@ def _abstract_facts(
     for section_index, section in enumerate(logical_sections):
         if section.role != "abstract":
             continue
-        end_index = section.end_paragraph_index or paragraphs[-1].index
+        end_index = (
+            section.end_paragraph_index
+            if section.end_paragraph_index is not None
+            else paragraphs[-1].index
+        )
         content_paragraphs = [
             paragraph
             for paragraph in paragraphs
             if section.start_paragraph_index < paragraph.index <= end_index
         ]
+        title_paragraph = next(
+            (
+                paragraph
+                for paragraph in paragraphs
+                if paragraph.index == section.start_paragraph_index
+            ),
+            None,
+        )
+        inline_content = (
+            _inline_abstract_content(title_paragraph.text)
+            if title_paragraph is not None
+            else ""
+        )
         keyword = next(
             (
                 paragraph.text.strip()
@@ -890,11 +911,13 @@ def _abstract_facts(
         )
         if keyword is None:
             keyword = _following_keyword_text(paragraphs, logical_sections, section_index)
-        content_text = "\n".join(
+        content_parts = [inline_content] if inline_content else []
+        content_parts.extend(
             paragraph.text.strip()
             for paragraph in content_paragraphs
             if paragraph.text.strip() and not _is_keyword_paragraph(paragraph.text)
         )
+        content_text = "\n".join(content_parts)
         facts.append(
             AbstractFact(
                 language=_abstract_language(section.title),
@@ -919,7 +942,11 @@ def _following_keyword_text(
     next_section = logical_sections[section_index + 1]
     if next_section.role != "keywords":
         return None
-    end_index = next_section.end_paragraph_index or paragraphs[-1].index
+    end_index = (
+        next_section.end_paragraph_index
+        if next_section.end_paragraph_index is not None
+        else paragraphs[-1].index
+    )
     return next(
         (
             paragraph.text.strip()
@@ -936,6 +963,15 @@ def _abstract_language(title: str) -> str:
     if "英文" in title or "abstract" in normalized:
         return "en"
     return "zh"
+
+
+def _inline_abstract_content(text: str) -> str:
+    stripped = text.strip()
+    for prefix in ["摘 要", "摘要", "中文摘要", "Abstract", "英文摘要"]:
+        match = re.match(rf"^{re.escape(prefix)}\s*[:：]\s*(.+)$", stripped, flags=re.I)
+        if match:
+            return match.group(1).strip()
+    return ""
 
 
 def _abstract_word_count(text: str) -> int:

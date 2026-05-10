@@ -326,11 +326,19 @@ class AbstractChecker:
             for fact in document.facts.abstracts:
                 min_count = rule.expectation.get("minWordCount")
                 max_count = rule.expectation.get("maxWordCount")
-                if isinstance(min_count, int | float) and fact.word_count < min_count:
+                if (
+                    isinstance(min_count, int | float)
+                    and _abstract_word_count_rule_applies(rule, fact.language)
+                    and fact.word_count < min_count
+                ):
                     findings.append(
                         _abstract_count_finding(rule, fact, {"minWordCount": min_count})
                     )
-                if isinstance(max_count, int | float) and fact.word_count > max_count:
+                if (
+                    isinstance(max_count, int | float)
+                    and _abstract_word_count_rule_applies(rule, fact.language)
+                    and fact.word_count > max_count
+                ):
                     findings.append(
                         _abstract_count_finding(rule, fact, {"maxWordCount": max_count})
                     )
@@ -564,3 +572,20 @@ def _abstract_count_finding(
         evidence="摘要字数不符合规则要求。",
         suggestion="请按规范调整摘要篇幅。",
     )
+
+
+def _abstract_word_count_rule_applies(rule: FormatRule, language: str) -> bool:
+    source_text = f"{rule.target.selector or ''} {rule.source.excerpt}"
+    if _mentions_chinese_abstract(source_text) and not _mentions_english_abstract(source_text):
+        return language == "zh"
+    if _mentions_english_abstract(source_text) and not _mentions_chinese_abstract(source_text):
+        return language == "en"
+    return True
+
+
+def _mentions_chinese_abstract(text: str) -> bool:
+    return "中文摘要" in text or "摘 要" in text
+
+
+def _mentions_english_abstract(text: str) -> bool:
+    return "英文摘要" in text or "Abstract" in text
