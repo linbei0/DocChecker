@@ -476,10 +476,11 @@ def test_engine_reports_font_mismatch(tmp_path: Path) -> None:
     assert findings[0].context["field_label"] == "中文字体"
 
 
-def test_engine_checks_body_text_inside_table_cells(tmp_path: Path) -> None:
+def test_body_rules_ignore_table_cells_unless_scope_is_explicit(tmp_path: Path) -> None:
     path = tmp_path / "table-body.docx"
     document = Document()
-    document.add_paragraph("正文")
+    paragraph = document.add_paragraph("正文")
+    paragraph.runs[0].font.name = "Arial"
     table = document.add_table(rows=1, cols=1)
     table.cell(0, 0).text = "表格正文"
     run = table.cell(0, 0).paragraphs[0].runs[0]
@@ -487,19 +488,37 @@ def test_engine_checks_body_text_inside_table_cells(tmp_path: Path) -> None:
     document.save(path)
 
     model = parse_docx(path, document_id="doc_1", source_filename="table-body.docx")
-    rule = FormatRule(
-        id="body_table_font",
-        category=RuleCategory.font,
-        target=RuleTarget(scope="body.paragraph"),
-        expectation={"fontFamilyEastAsia": "宋体"},
-        severity=Severity.major,
-        source=RuleSource(type=SourceType.manual, excerpt="正文宋体"),
+    rules = [
+        FormatRule(
+            id="body_font",
+            category=RuleCategory.font,
+            target=RuleTarget(scope="body.paragraph"),
+            expectation={"fontFamilyEastAsia": "宋体"},
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="正文宋体"),
+        ),
+        FormatRule(
+            id="table_cell_font",
+            category=RuleCategory.font,
+            target=RuleTarget(scope="table_cell"),
+            expectation={"fontFamilyEastAsia": "宋体"},
+            severity=Severity.major,
+            source=RuleSource(type=SourceType.manual, excerpt="表格正文宋体"),
+        ),
+    ]
+
+    findings = CheckEngine().run(model, rules)
+
+    assert any(
+        finding.rule_id == "body_font" and finding.excerpt == "正文"
+        for finding in findings
     )
-
-    findings = CheckEngine().run(model, [rule])
-
-    assert any(finding.excerpt == "表格正文" for finding in findings)
+    assert not any(
+        finding.rule_id == "body_font" and finding.excerpt == "表格正文"
+        for finding in findings
+    )
     table_finding = next(finding for finding in findings if finding.excerpt == "表格正文")
+    assert table_finding.rule_id == "table_cell_font"
     assert table_finding.location.display_path == (
         "正文 / 表 1 第 1 行第 1 列 / 单元格第 1 段 / 第 2 段"
     )

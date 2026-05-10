@@ -15,6 +15,9 @@ class ParagraphMatchIndex:
             for paragraph in self.paragraphs
             if not (paragraph.style_name or "").lower().startswith("heading")
         ]
+        self.table_cell_paragraphs = [
+            paragraph for paragraph in self.paragraphs if paragraph.table_index is not None
+        ]
         self.toc_indexes = {
             paragraph.index for paragraph in self.paragraphs if self._is_toc_paragraph(paragraph)
         }
@@ -31,6 +34,8 @@ class ParagraphMatchIndex:
                 if paragraph.index not in self.toc_indexes
                 and _matches_heading_level(paragraph, rule.target.scope, selector)
             ]
+        if _is_table_cell_scope(rule.target.scope):
+            return _selector_matches(self.table_cell_paragraphs, selector)
         if rule.target.scope.startswith("body"):
             return self.body_paragraphs
         if selector:
@@ -46,6 +51,8 @@ class ParagraphMatchIndex:
                 if paragraph.index not in self.toc_indexes
                 and _matches_heading_level(paragraph, rule.target.scope, selector)
             ]
+        if _is_table_cell_scope(rule.target.scope):
+            return _selector_matches(self.table_cell_paragraphs, selector)
         if rule.target.scope.startswith("body"):
             return self.body_paragraphs
         if selector:
@@ -73,17 +80,29 @@ class ParagraphMatchIndex:
             return False
         if paragraph.index in self.toc_indexes:
             return False
+        if paragraph.table_index is not None:
+            return False
         if _matches_heading_level(paragraph, "heading", None):
             return False
         return not _is_caption_paragraph(paragraph)
 
 
-def _selector_matches(paragraphs: list[ParagraphNode], selector: str) -> list[ParagraphNode]:
+def _selector_matches(
+    paragraphs: list[ParagraphNode],
+    selector: str | None,
+) -> list[ParagraphNode]:
+    if not selector:
+        return paragraphs
     return [
         paragraph
         for paragraph in paragraphs
         if paragraph.style_name == selector or selector in paragraph.text
     ]
+
+
+def _is_table_cell_scope(scope: str) -> bool:
+    normalized = scope.lower().replace("-", "_")
+    return normalized.startswith(("table_cell", "table.cell", "table.paragraph"))
 
 
 def _matches_heading_level(
