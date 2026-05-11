@@ -337,6 +337,29 @@ def test_parse_docx_resolves_east_asia_font_from_style_xml(tmp_path: Path) -> No
     assert paragraph.font_size_pt == 16
 
 
+def test_parse_docx_does_not_treat_latin_slots_as_east_asia_font(tmp_path: Path) -> None:
+    path = tmp_path / "heading-latin-direct-font.docx"
+    document = Document()
+    style = document.styles["Heading 2"]
+    r_pr = style._element.get_or_add_rPr()
+    r_fonts = r_pr.get_or_add_rFonts()
+    r_fonts.set(qn("w:eastAsia"), "黑体")
+    style.font.size = Pt(14)
+
+    paragraph = document.add_paragraph(style="Heading 2")
+    run = paragraph.add_run("研究背景")
+    run_fonts = run._element.get_or_add_rPr().get_or_add_rFonts()
+    run_fonts.set(qn("w:ascii"), "Times New Roman")
+    run_fonts.set(qn("w:hAnsi"), "Times New Roman")
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="heading-latin-direct-font.docx")
+    paragraph_node = model.paragraphs[0]
+
+    assert paragraph_node.font_family_east_asia == "黑体"
+    assert paragraph_node.runs[0].font_family_east_asia == "黑体"
+
+
 def test_parse_docx_tracks_mixed_script_fonts_separately(tmp_path: Path) -> None:
     path = tmp_path / "mixed-font.docx"
     document = Document()
@@ -699,6 +722,30 @@ def test_heading_rules_match_exact_heading_level(tmp_path: Path) -> None:
     )
 
     findings = CheckEngine().run(model, ruleset.rules)
+
+    assert findings == []
+
+
+def test_heading_rules_do_not_match_decimal_table_values(tmp_path: Path) -> None:
+    path = tmp_path / "decimal-table-values.docx"
+    document = Document()
+    table = document.add_table(rows=1, cols=1)
+    paragraph = table.cell(0, 0).paragraphs[0]
+    paragraph.text = "39.91"
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.save(path)
+
+    model = parse_docx(path, document_id="doc_1", source_filename="decimal-table-values.docx")
+    rule = FormatRule(
+        id="heading2_alignment",
+        category=RuleCategory.heading,
+        target=RuleTarget(scope="heading.2", selector="Heading 2"),
+        expectation={"alignment": "left"},
+        severity=Severity.major,
+        source=RuleSource(type=SourceType.manual, excerpt="二级标题左对齐"),
+    )
+
+    findings = CheckEngine().run(model, [rule])
 
     assert findings == []
 

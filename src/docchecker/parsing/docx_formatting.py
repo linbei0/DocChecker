@@ -43,7 +43,7 @@ def _style_chain(style) -> list[object]:
 def _font_name(font, *, script: str | None = None) -> str | None:
     r_fonts_name = _r_fonts_name(getattr(font, "_element", None), script=script)
     if script:
-        return _clean_font_name(r_fonts_name or font.name)
+        return _clean_font_name(r_fonts_name)
     return _clean_font_name(font.name or r_fonts_name)
 
 
@@ -62,16 +62,11 @@ def _r_fonts_name(element, *, script: str | None = None) -> str | None:
     if r_fonts is None:
         return None
     if script == "east_asia":
-        return (
-            r_fonts.get(qn("w:eastAsia"))
-            or r_fonts.get(qn("w:hAnsi"))
-            or r_fonts.get(qn("w:ascii"))
-        )
+        return r_fonts.get(qn("w:eastAsia"))
     if script == "ascii":
         return (
             r_fonts.get(qn("w:ascii"))
             or r_fonts.get(qn("w:hAnsi"))
-            or r_fonts.get(qn("w:eastAsia"))
         )
     return (
         r_fonts.get(qn("w:eastAsia"))
@@ -233,17 +228,34 @@ def _run_spans(paragraph, default_font_name: str | None) -> list[RunSpan]:
         if not run.text:
             continue
         script = _run_script(run.text)
-        font_family = _run_style_font_name(run, paragraph, default_font_name)
+        east_asia_font = (
+            _run_style_font_name(run, paragraph, default_font_name, script="east_asia")
+            if script in {"east_asia", "mixed"}
+            else None
+        )
+        ascii_font = (
+            _run_style_font_name(run, paragraph, default_font_name, script="ascii")
+            if script in {"ascii", "mixed"}
+            else None
+        )
+        if script == "mixed":
+            font_family = _single_value(
+                [value for value in [east_asia_font, ascii_font] if value]
+            )
+        else:
+            font_family = (
+                east_asia_font
+                or ascii_font
+                or _run_style_font_name(run, paragraph, default_font_name)
+            )
         size = _run_style_font_value(run, paragraph, "size")
         spans.append(
             RunSpan(
                 text=run.text,
                 script=script,
                 font_family=font_family,
-                font_family_east_asia=(
-                    font_family if script in {"east_asia", "mixed"} else None
-                ),
-                font_family_ascii=font_family if script in {"ascii", "mixed"} else None,
+                font_family_east_asia=east_asia_font,
+                font_family_ascii=ascii_font,
                 font_size_pt=size.pt if size is not None else None,
                 bold=_run_style_bold(run, paragraph),
                 style_name=run.style.name if getattr(run, "style", None) else None,
@@ -351,5 +363,4 @@ def _effective_format_sources(paragraph, default_font_name: str | None) -> dict[
 
 
 ParagraphLocator = dict[str, str | int | None]
-
 

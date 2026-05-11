@@ -137,8 +137,10 @@ def _style_heading_level(style_name: str) -> int | None:
 def _numbered_heading_level(text: str) -> int | None:
     if re.match(r"^\s*\d+(?:\.\d+){0,5}\s+.+\s+\d+\s*$", text):
         return None
-    if match := re.match(r"^\s*\d+(?:\.\d+){0,5}(?=\s|\t|$)", text):
-        return match.group(0).count(".") + 1
+    if match := re.match(r"^\s*(\d+(?:\.\d+){0,5})\s+(.+?)\s*$", text):
+        title = match.group(2).strip()
+        if title and not title.isdigit():
+            return match.group(1).count(".") + 1
     return None
 
 
