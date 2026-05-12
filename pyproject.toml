@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 docchecker-api = "docchecker.api.main:run"
+docchecker-worker = "docchecker.services.task_queue:run_worker"
 
 [build-system]
 requires = ["hatchling"]

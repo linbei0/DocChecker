@@ -1,6 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 from time import sleep
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
@@ -8,8 +9,13 @@ from fastapi.testclient import TestClient
 
 from docchecker.api import main
 from docchecker.api.main import app
+from docchecker.domain.document import UploadedDocumentRecord
+from docchecker.domain.enums import SourceType, TaskStatus
+from docchecker.domain.requirements import RequirementDocument
+from docchecker.domain.rules import RuleSet
 from docchecker.services.file_storage import LocalFileStorage
 from docchecker.services.state_store import SqliteStateStore
+from docchecker.services.task_queue import BackgroundJobEnqueueError
 from docchecker.services.word_document_preparer import PreparedWordDocument
 
 
@@ -251,6 +257,163 @@ def test_requirement_document_draft_is_created_before_background_extraction(
     assert persisted["status"] == "draft"
     assert persisted["rules"]
     assert persisted["error"] is None
+
+
+def test_check_task_uses_rq_enqueue_without_inline_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "paper.docx"
+    _create_docx(document_path, "正文内容")
+    main.state_store.save_document(
+        UploadedDocumentRecord(
+            id="doc_rq",
+            filename="paper.docx",
+            path=str(document_path),
+            original_path=str(document_path),
+            original_format="docx",
+            normalized_format="docx",
+            size_bytes=document_path.stat().st_size,
+        )
+    )
+    main.state_store.save_ruleset(
+        RuleSet(
+            id="ruleset_rq",
+            name="RQ 模板",
+            source_type=SourceType.manual,
+            version="1.0.0",
+            rules=[],
+            created_at="2026-05-12T00:00:00+00:00",
+        )
+    )
+    enqueued_jobs: list[tuple] = []
+
+    def capture_start_background_job(settings, function, *args):
+        enqueued_jobs.append((settings.task_execution_mode, function, args))
+        return "rq_job_1"
+
+    monkeypatch.setattr(main.settings, "task_execution_mode", "rq")
+    monkeypatch.setattr(main, "start_background_job", capture_start_background_job)
+    client = TestClient(app)
+
+    task_response = client.post(
+        "/api/check-tasks",
+        json={"document_id": "doc_rq", "ruleset_id": "ruleset_rq"},
+    )
+
+    assert task_response.status_code == 200
+    task = task_response.json()
+    assert task["status"] == "pending"
+    assert enqueued_jobs == [("rq", main._execute_check_task, (task["id"],))]
+    persisted_task = main.state_store.get_check_task(task["id"])
+    assert persisted_task is not None
+    assert persisted_task.status == TaskStatus.pending
+    assert persisted_task.report_id is None
+
+
+def test_check_task_marks_failed_when_rq_enqueue_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "paper.docx"
+    _create_docx(document_path, "正文内容")
+    main.state_store.save_document(
+        UploadedDocumentRecord(
+            id="doc_rq_fail",
+            filename="paper.docx",
+            path=str(document_path),
+            original_path=str(document_path),
+            original_format="docx",
+            normalized_format="docx",
+            size_bytes=document_path.stat().st_size,
+        )
+    )
+    main.state_store.save_ruleset(
+        RuleSet(
+            id="ruleset_rq_fail",
+            name="RQ 模板",
+            source_type=SourceType.manual,
+            version="1.0.0",
+            rules=[],
+            created_at="2026-05-12T00:00:00+00:00",
+        )
+    )
+
+    def fail_start_background_job(settings, function, *args):
+        raise BackgroundJobEnqueueError("Redis 不可用")
+
+    monkeypatch.setattr(main.settings, "task_execution_mode", "rq")
+    monkeypatch.setattr(main, "start_background_job", fail_start_background_job)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    task_response = client.post(
+        "/api/check-tasks",
+        json={"document_id": "doc_rq_fail", "ruleset_id": "ruleset_rq_fail"},
+    )
+
+    assert task_response.status_code == 503
+    assert task_response.json()["detail"] == "Redis 不可用"
+    persisted_tasks = main.state_store.list_check_tasks()
+    assert len(persisted_tasks) == 1
+    assert persisted_tasks[0].status == TaskStatus.failed
+    assert persisted_tasks[0].error == "Redis 不可用"
+
+
+def test_requirement_draft_marks_failed_when_rq_enqueue_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "paper.docx"
+    requirement_path = tmp_path / "rules.docx"
+    _create_docx(document_path, "正文内容")
+    _create_docx(requirement_path, "正文宋体小四。")
+    main.state_store.save_document(
+        UploadedDocumentRecord(
+            id="doc_draft_rq_fail",
+            filename="paper.docx",
+            path=str(document_path),
+            original_path=str(document_path),
+            original_format="docx",
+            normalized_format="docx",
+            size_bytes=document_path.stat().st_size,
+        )
+    )
+    main.state_store.save_requirement_document(
+        RequirementDocument(
+            id="req_draft_rq_fail",
+            filename="rules.docx",
+            path=str(requirement_path),
+            size_bytes=requirement_path.stat().st_size,
+            extracted_text="正文宋体小四。",
+            original_format="docx",
+            normalized_format="docx",
+            created_at="2026-05-12T00:00:00+00:00",
+        )
+    )
+
+    def fail_start_background_job(settings, function, *args):
+        raise BackgroundJobEnqueueError("Redis 不可用")
+
+    monkeypatch.setattr(main.settings, "task_execution_mode", "rq")
+    monkeypatch.setattr(main, "start_background_job", fail_start_background_job)
+    monkeypatch.setattr(main, "uuid4", lambda: SimpleNamespace(hex="draft_rq_fail"))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    draft_response = client.post(
+        "/api/draft-rulesets",
+        json={
+            "document_id": "doc_draft_rq_fail",
+            "source_type": "requirement_doc",
+            "requirement_document_id": "req_draft_rq_fail",
+        },
+    )
+
+    assert draft_response.status_code == 503
+    assert draft_response.json()["detail"] == "Redis 不可用"
+    persisted_draft = main.state_store.get_draft_ruleset("draft_draft_rq_fail")
+    assert persisted_draft is not None
+    assert persisted_draft.status.value == "failed"
+    assert persisted_draft.error == "Redis 不可用"
 
 
 def test_upload_document_accepts_doc_after_conversion(monkeypatch: pytest.MonkeyPatch) -> None:

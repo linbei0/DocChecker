@@ -1,8 +1,7 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Timer
 from typing import Annotated
 from uuid import uuid4
 
@@ -33,6 +32,12 @@ from docchecker.services.rule_extractor import (
     extract_rules_from_text,
 )
 from docchecker.services.state_store import SqliteStateStore
+from docchecker.services.task_queue import (
+    BackgroundJobEnqueueError,
+    current_rq_job_is_active,
+    current_rq_job_should_retry,
+    start_background_job,
+)
 from docchecker.services.word_document_preparer import prepare_word_document
 
 settings = get_settings()
@@ -264,11 +269,23 @@ def create_draft_ruleset(
                 updated_at=now,
             )
             state_store.save_draft_ruleset(draft)
-            _start_background_job(
-                _execute_draft_ruleset_extraction,
-                draft.id,
-                requirement_document.id,
-            )
+            try:
+                _start_background_job(
+                    _execute_draft_ruleset_extraction,
+                    draft.id,
+                    requirement_document.id,
+                )
+            except BackgroundJobEnqueueError as exc:
+                failed = draft.model_copy(
+                    update={
+                        "status": DraftRuleSetStatus.failed,
+                        "error": str(exc),
+                        "updated_at": _now(),
+                    },
+                    deep=True,
+                )
+                state_store.save_draft_ruleset(failed)
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
             return draft
         try:
             result = extract_rules_from_text(text, source_type=request.source_type)
@@ -303,7 +320,19 @@ def create_draft_ruleset(
 def _execute_draft_ruleset_extraction(draft_id: str, requirement_document_id: str) -> None:
     draft = state_store.get_draft_ruleset(draft_id)
     requirement_document = state_store.get_requirement_document(requirement_document_id)
-    if not draft or not requirement_document:
+    if not draft:
+        return
+    if not requirement_document:
+        failed = draft.model_copy(
+            update={
+                "parse_warnings": [],
+                "status": DraftRuleSetStatus.failed,
+                "error": "规范文档不存在，无法执行规则抽取。",
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+        state_store.save_draft_ruleset(failed)
         return
 
     try:
@@ -340,6 +369,8 @@ def _execute_draft_ruleset_extraction(draft_id: str, requirement_document_id: st
             deep=True,
         )
     except Exception as exc:
+        if _save_draft_retry_or_final_failure(draft, exc):
+            raise
         updated = draft.model_copy(
             update={
                 "parse_warnings": [],
@@ -440,15 +471,19 @@ def create_check_task(
         updated_at=_now(),
     )
     state_store.save_check_task(task)
-    _start_background_job(_execute_check_task, task.id)
+    try:
+        _start_background_job(_execute_check_task, task.id)
+    except BackgroundJobEnqueueError as exc:
+        failed = task.model_copy(
+            update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
+        )
+        state_store.save_check_task(failed)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return task
 
 
-def _start_background_job(function, *args) -> None:
-    # 先让 HTTP 响应写出，再启动 CPU 密集的文档解析，避免新线程抢占 GIL 拖慢首包。
-    worker = Timer(0.1, function, args=args)
-    worker.daemon = True
-    worker.start()
+def _start_background_job(function: Callable[..., object], *args: object) -> str | None:
+    return start_background_job(settings, function, *args)
 
 
 def _execute_check_task(task_id: str) -> None:
@@ -467,7 +502,9 @@ def _execute_check_task(task_id: str) -> None:
         )
         state_store.save_check_task(failed)
         return
-    running = task.model_copy(update={"status": TaskStatus.running, "updated_at": _now()})
+    running = task.model_copy(
+        update={"status": TaskStatus.running, "error": None, "updated_at": _now()}
+    )
     state_store.save_check_task(running)
     service = CheckService(settings, storage)
     try:
@@ -484,6 +521,8 @@ def _execute_check_task(task_id: str) -> None:
         state_store.save_check_task(failed)
         return
     except Exception as exc:
+        if _save_check_task_retry_or_final_failure(running, exc):
+            raise
         failed = running.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
@@ -501,11 +540,58 @@ def _execute_check_task(task_id: str) -> None:
         )
     except Exception as exc:
         storage.report_path(report.id).unlink(missing_ok=True)
+        if _save_check_task_retry_or_final_failure(running, exc):
+            raise
         failed = running.model_copy(
             update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
         )
         state_store.save_check_task(failed)
         return
+
+
+def _save_draft_retry_or_final_failure(draft: DraftRuleSet, exc: Exception) -> bool:
+    if not current_rq_job_is_active():
+        return False
+    if current_rq_job_should_retry():
+        updated = draft.model_copy(
+            update={
+                "status": DraftRuleSetStatus.processing,
+                "error": f"上次规则抽取失败，等待 RQ 重试：{exc}",
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+    else:
+        updated = draft.model_copy(
+            update={
+                "parse_warnings": [],
+                "status": DraftRuleSetStatus.failed,
+                "error": str(exc),
+                "updated_at": _now(),
+            },
+            deep=True,
+        )
+    state_store.save_draft_ruleset(updated)
+    return True
+
+
+def _save_check_task_retry_or_final_failure(task: CheckTask, exc: Exception) -> bool:
+    if not current_rq_job_is_active():
+        return False
+    if current_rq_job_should_retry():
+        updated = task.model_copy(
+            update={
+                "status": TaskStatus.pending,
+                "error": f"上次检查失败，等待 RQ 重试：{exc}",
+                "updated_at": _now(),
+            }
+        )
+    else:
+        updated = task.model_copy(
+            update={"status": TaskStatus.failed, "error": str(exc), "updated_at": _now()}
+        )
+    state_store.save_check_task(updated)
+    return True
 
 
 @app.get("/api/check-tasks", response_model=list[CheckTask])
