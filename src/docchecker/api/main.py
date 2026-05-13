@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from docchecker.core.config import get_settings
@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="DocChecker API", version="0.1.0", lifespan=lifespan)
+PUBLISH_DRAFT_RULESET_BODY = Body(default=None)
 
 
 class UploadedDocumentResponse(BaseModel):
@@ -75,15 +76,33 @@ class CreateCheckTaskRequest(BaseModel):
 class UpdateRuleSetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1)
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    version_note: str | None = None
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         name = value.strip()
         if not name:
             raise ValueError("模板名称不能为空。")
         return name
+
+    @field_validator("school", "college", "thesis_type", "version_note")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+    @model_validator(mode="after")
+    def require_metadata_change(self) -> "UpdateRuleSetRequest":
+        editable_fields = {"name", "school", "college", "thesis_type", "version_note"}
+        if not (self.model_fields_set & editable_fields):
+            raise ValueError("至少提供一个模板字段。")
+        return self
 
 
 class CreateDraftRuleSetRequest(BaseModel):
@@ -94,6 +113,11 @@ class CreateDraftRuleSetRequest(BaseModel):
     manual_text: str | None = None
     requirement_document_id: str | None = None
     template_ruleset_id: str | None = None
+    name: str | None = None
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    version_note: str | None = None
 
     @model_validator(mode="after")
     def validate_source_payload(self) -> "CreateDraftRuleSetRequest":
@@ -105,6 +129,11 @@ class CreateDraftRuleSetRequest(BaseModel):
             raise ValueError("模板规则来源必须提供 template_ruleset_id。")
         return self
 
+    @field_validator("name", "school", "college", "thesis_type", "version_note")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
 
 class UpdateDraftRuleSetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -113,6 +142,30 @@ class UpdateDraftRuleSetRequest(BaseModel):
     suggested_rules: list[FormatRule] | None = None
     name: str | None = None
     parse_warnings: list[str] | None = None
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    version_note: str | None = None
+
+    @field_validator("name", "school", "college", "thesis_type", "version_note")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
+
+
+class PublishDraftRuleSetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    version_note: str | None = None
+
+    @field_validator("name", "school", "college", "thesis_type", "version_note")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return _clean_optional_text(value)
 
 
 @app.get("/api/health")
@@ -209,8 +262,15 @@ def create_ruleset(ruleset: RuleSet) -> RuleSet:
 def list_rulesets(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    include_history: bool = Query(False),
+    include_archived: bool = Query(False),
 ) -> list[RuleSet]:
-    return state_store.list_rulesets(limit=limit, offset=offset)
+    return state_store.list_rulesets(
+        include_history=include_history,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @app.patch("/api/rulesets/{ruleset_id}", response_model=RuleSet)
@@ -218,9 +278,49 @@ def update_ruleset(ruleset_id: str, request: UpdateRuleSetRequest) -> RuleSet:
     ruleset = state_store.get_ruleset(ruleset_id)
     if not ruleset:
         raise HTTPException(status_code=404, detail="规则集不存在。")
-    updated = ruleset.model_copy(update={"name": request.name}, deep=True)
-    state_store.save_ruleset(updated)
+    if ruleset.archived_at:
+        raise HTTPException(status_code=404, detail="规则集不存在。")
+    if not ruleset.is_latest:
+        raise HTTPException(status_code=409, detail="历史版本不能直接更新，请更新最新版本。")
+    now = _now()
+    previous = ruleset.model_copy(update={"is_latest": False, "updated_at": now}, deep=True)
+    updated = ruleset.model_copy(
+        update={
+            "id": f"ruleset_{uuid4().hex}",
+            "template_id": _ruleset_template_id(ruleset),
+            "name": request.name or ruleset.name,
+            "school": request.school if "school" in request.model_fields_set else ruleset.school,
+            "college": request.college
+            if "college" in request.model_fields_set
+            else ruleset.college,
+            "thesis_type": request.thesis_type
+            if "thesis_type" in request.model_fields_set
+            else ruleset.thesis_type,
+            "version": _next_patch_version(ruleset.version),
+            "previous_ruleset_id": ruleset.id,
+            "is_latest": True,
+            "version_note": request.version_note,
+            "created_at": now,
+            "updated_at": now,
+            "archived_at": None,
+        },
+        deep=True,
+    )
+    state_store.save_many(
+        [
+            ("ruleset", previous.id, previous),
+            ("ruleset", updated.id, updated),
+        ]
+    )
     return updated
+
+
+@app.get("/api/rulesets/{ruleset_id}/versions", response_model=list[RuleSet])
+def list_ruleset_versions(ruleset_id: str) -> list[RuleSet]:
+    versions = state_store.list_ruleset_versions(ruleset_id)
+    if not versions:
+        raise HTTPException(status_code=404, detail="规则集不存在。")
+    return versions
 
 
 @app.delete("/api/rulesets/{ruleset_id}")
@@ -249,6 +349,10 @@ def create_draft_ruleset(
         extraction_summary = ExtractionSummary(structured_rules=len(rules))
         unsupported_requirements: list[UnsupportedRequirement] = []
         name = f"{template.name} 副本"
+        school = template.school
+        college = template.college
+        thesis_type = template.thesis_type
+        version_note = "从模板复制"
         extraction_trace = None
     else:
         text = request.manual_text or ""
@@ -260,9 +364,13 @@ def create_draft_ruleset(
                 raise HTTPException(status_code=404, detail="规范文档不存在。")
             draft = DraftRuleSet(
                 id=f"draft_{uuid4().hex}",
-                name="候选规则集",
                 document_id=request.document_id,
                 source_type=request.source_type,
+                name=request.name or "候选规则集",
+                school=request.school,
+                college=request.college,
+                thesis_type=request.thesis_type,
+                version_note=request.version_note,
                 parse_warnings=["规则抽取正在后台执行，请稍后刷新。"],
                 status=DraftRuleSetStatus.processing,
                 created_at=now,
@@ -298,12 +406,20 @@ def create_draft_ruleset(
         unsupported_requirements = result.unsupported_requirements
         extraction_trace = result.extraction_trace
         name = "候选规则集"
+        school = request.school
+        college = request.college
+        thesis_type = request.thesis_type
+        version_note = request.version_note
 
     draft = DraftRuleSet(
         id=f"draft_{uuid4().hex}",
-        name=name,
+        name=request.name or name,
         document_id=request.document_id,
         source_type=request.source_type,
+        school=school,
+        college=college,
+        thesis_type=thesis_type,
+        version_note=version_note,
         rules=rules,
         suggested_rules=suggested_rules,
         parse_warnings=warnings,
@@ -410,6 +526,14 @@ def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> D
             "parse_warnings": request.parse_warnings
             if request.parse_warnings is not None
             else draft.parse_warnings,
+            "school": request.school if "school" in request.model_fields_set else draft.school,
+            "college": request.college if "college" in request.model_fields_set else draft.college,
+            "thesis_type": request.thesis_type
+            if "thesis_type" in request.model_fields_set
+            else draft.thesis_type,
+            "version_note": request.version_note
+            if "version_note" in request.model_fields_set
+            else draft.version_note,
             "updated_at": _now(),
         },
         deep=True,
@@ -419,26 +543,49 @@ def update_draft_ruleset(draft_id: str, request: UpdateDraftRuleSetRequest) -> D
 
 
 @app.post("/api/draft-rulesets/{draft_id}/publish", response_model=RuleSet)
-def publish_draft_ruleset(draft_id: str) -> RuleSet:
+def publish_draft_ruleset(
+    draft_id: str,
+    request: PublishDraftRuleSetRequest | None = PUBLISH_DRAFT_RULESET_BODY,
+) -> RuleSet:
     draft = get_draft_ruleset(draft_id)
     if draft.status == DraftRuleSetStatus.processing:
         raise HTTPException(status_code=409, detail="候选规则仍在生成中，请稍后再发布。")
     if draft.status == DraftRuleSetStatus.failed:
         raise HTTPException(status_code=400, detail=draft.error or "候选规则生成失败。")
+    now = _now()
     ruleset = RuleSet(
         id=f"ruleset_{uuid4().hex}",
-        name=draft.name,
+        template_id=f"tpl_{uuid4().hex}",
+        name=request.name or draft.name if request else draft.name,
         source_type=draft.source_type,
         version=draft.version,
         locale=draft.locale,
+        school=request.school
+        if request and "school" in request.model_fields_set
+        else draft.school,
+        college=request.college
+        if request and "college" in request.model_fields_set
+        else draft.college,
+        thesis_type=request.thesis_type
+        if request and "thesis_type" in request.model_fields_set
+        else draft.thesis_type,
+        version_note=request.version_note
+        if request and "version_note" in request.model_fields_set
+        else draft.version_note,
         rules=[rule.model_copy(deep=True) for rule in draft.rules],
-        created_at=_now(),
+        created_at=now,
+        updated_at=now,
     )
     published_draft = draft.model_copy(
         update={
             "status": DraftRuleSetStatus.published,
             "published_ruleset_id": ruleset.id,
-            "updated_at": _now(),
+            "name": ruleset.name,
+            "school": ruleset.school,
+            "college": ruleset.college,
+            "thesis_type": ruleset.thesis_type,
+            "version_note": ruleset.version_note,
+            "updated_at": now,
         }
     )
     state_store.save_many(
@@ -642,6 +789,22 @@ def _cleanup_failed_upload(path: Path) -> None:
     path.unlink(missing_ok=True)
     if path.suffix.lower() == ".doc":
         path.with_suffix(".docx").unlink(missing_ok=True)
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _ruleset_template_id(ruleset: RuleSet) -> str:
+    return ruleset.template_id or ruleset.id
+
+
+def _next_patch_version(version: str) -> str:
+    major, minor, patch = [int(part) for part in version.split(".")]
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def _now() -> str:

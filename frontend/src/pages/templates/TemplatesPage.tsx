@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { ClipboardList, Plus, RefreshCw } from 'lucide-react'
 import {
   useDeleteRuleSetMutation,
+  useRuleSetVersionsQuery,
   useRuleSetsQuery,
   useUpdateRuleSetMutation,
 } from '@/features/rulesets/hooks'
@@ -11,6 +12,14 @@ import { Button } from '@/shared/ui/Button'
 import { RuleDetails, TemplateCard, TemplateRows } from './TemplateList'
 
 const PAGE_SIZE = 20
+
+interface TemplateMetadataDraft {
+  name: string
+  school: string
+  college: string
+  thesisType: string
+  versionNote: string
+}
 
 export function TemplatesPage() {
   const [offset, setOffset] = useState(0)
@@ -21,9 +30,17 @@ export function TemplatesPage() {
   const [expandedRuleSetId, setExpandedRuleSetId] = useState<string | null>(null)
   const [editingRuleSetId, setEditingRuleSetId] = useState<string | null>(null)
   const [deletingRuleSetId, setDeletingRuleSetId] = useState<string | null>(null)
-  const [draftName, setDraftName] = useState('')
+  const [draftMetadata, setDraftMetadata] = useState<TemplateMetadataDraft>({
+    name: '',
+    school: '',
+    college: '',
+    thesisType: '',
+    versionNote: '',
+  })
   const updateRuleSetMutation = useUpdateRuleSetMutation(editingRuleSetId || '')
   const deleteRuleSetMutation = useDeleteRuleSetMutation()
+  const { data: expandedVersions = [], isLoading: isLoadingVersions } =
+    useRuleSetVersionsQuery(expandedRuleSetId || '')
   const page = Math.floor(offset / PAGE_SIZE) + 1
 
   const expandedRuleSet = useMemo(
@@ -33,22 +50,41 @@ export function TemplatesPage() {
 
   const startEditing = (ruleSet: RuleSet) => {
     setEditingRuleSetId(ruleSet.id)
-    setDraftName(ruleSet.name)
+    setDraftMetadata({
+      name: ruleSet.name,
+      school: ruleSet.school ?? '',
+      college: ruleSet.college ?? '',
+      thesisType: ruleSet.thesis_type ?? '',
+      versionNote: '',
+    })
   }
 
   const cancelEditing = () => {
     setEditingRuleSetId(null)
-    setDraftName('')
+    setDraftMetadata({
+      name: '',
+      school: '',
+      college: '',
+      thesisType: '',
+      versionNote: '',
+    })
   }
 
   const submitRename = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const name = draftName.trim()
+    const name = draftMetadata.name.trim()
     if (!editingRuleSetId || !name) return
     updateRuleSetMutation.mutate(
-      { name },
       {
-        onSuccess: () => {
+        name,
+        school: cleanTemplateMetadata(draftMetadata.school),
+        college: cleanTemplateMetadata(draftMetadata.college),
+        thesis_type: cleanTemplateMetadata(draftMetadata.thesisType),
+        version_note: cleanTemplateMetadata(draftMetadata.versionNote),
+      },
+      {
+        onSuccess: (updated) => {
+          setExpandedRuleSetId(updated.id)
           cancelEditing()
         },
       },
@@ -130,7 +166,9 @@ export function TemplatesPage() {
                     ruleSet={ruleSet}
                     isExpanded={isExpanded}
                     isEditing={isEditing}
-                    draftName={draftName}
+                    draftMetadata={draftMetadata}
+                    versions={isExpanded ? expandedVersions : []}
+                    isLoadingVersions={isExpanded && isLoadingVersions}
                     isSaving={updateRuleSetMutation.isPending && isEditing}
                     isDeleting={deletingRuleSetId === ruleSet.id}
                     renameError={
@@ -141,7 +179,9 @@ export function TemplatesPage() {
                     onToggle={() => setExpandedRuleSetId(isExpanded ? null : ruleSet.id)}
                     onStartEditing={() => startEditing(ruleSet)}
                     onCancelEditing={cancelEditing}
-                    onDraftNameChange={setDraftName}
+                    onDraftMetadataChange={(patch) =>
+                      setDraftMetadata((prev) => ({ ...prev, ...patch }))
+                    }
                     onSubmitRename={submitRename}
                     onDelete={() => deleteRuleSet(ruleSet)}
                   />
@@ -185,7 +225,9 @@ export function TemplatesPage() {
                         ruleSet={ruleSet}
                         isExpanded={isExpanded}
                         isEditing={isEditing}
-                        draftName={draftName}
+                        draftMetadata={draftMetadata}
+                        versions={isExpanded ? expandedVersions : []}
+                        isLoadingVersions={isExpanded && isLoadingVersions}
                         isSaving={updateRuleSetMutation.isPending && isEditing}
                         isDeleting={deletingRuleSetId === ruleSet.id}
                         renameError={
@@ -196,7 +238,9 @@ export function TemplatesPage() {
                         onToggle={() => setExpandedRuleSetId(isExpanded ? null : ruleSet.id)}
                         onStartEditing={() => startEditing(ruleSet)}
                         onCancelEditing={cancelEditing}
-                        onDraftNameChange={setDraftName}
+                        onDraftMetadataChange={(patch) =>
+                          setDraftMetadata((prev) => ({ ...prev, ...patch }))
+                        }
                         onSubmitRename={submitRename}
                         onDelete={() => deleteRuleSet(ruleSet)}
                       />
@@ -232,9 +276,18 @@ export function TemplatesPage() {
 
       {expandedRuleSet && (
         <section className="mt-5 hidden rounded-xl border border-neutral-200 bg-white shadow-sm md:block lg:hidden">
-          <RuleDetails ruleSet={expandedRuleSet} />
+          <RuleDetails
+            ruleSet={expandedRuleSet}
+            versions={expandedVersions}
+            isLoadingVersions={isLoadingVersions}
+          />
         </section>
       )}
     </div>
   )
+}
+
+function cleanTemplateMetadata(value: string) {
+  const trimmed = value.trim()
+  return trimmed || null
 }

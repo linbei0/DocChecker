@@ -5,7 +5,9 @@ import {
   createRuleSet,
   deleteRuleSet,
   getDraftRuleSet,
+  listRuleSetVersions,
   listRuleSets,
+  type PublishDraftRuleSetRequest,
   publishDraftRuleSet,
   updateRuleSet,
   updateDraftRuleSet,
@@ -14,12 +16,30 @@ import {
 interface RuleSetListOptions {
   limit?: number
   offset?: number
+  includeHistory?: boolean
 }
 
-export function useRuleSetsQuery({ limit = 50, offset = 0 }: RuleSetListOptions = {}) {
+interface PublishDraftRuleSetVariables {
+  draftId: string
+  request?: PublishDraftRuleSetRequest
+}
+
+export function useRuleSetsQuery({
+  limit = 50,
+  offset = 0,
+  includeHistory = false,
+}: RuleSetListOptions = {}) {
   return useQuery({
-    queryKey: queryKeys.rulesets.list(limit, offset),
-    queryFn: () => listRuleSets(limit, offset),
+    queryKey: queryKeys.rulesets.list(limit, offset, includeHistory),
+    queryFn: () => listRuleSets(limit, offset, includeHistory),
+  })
+}
+
+export function useRuleSetVersionsQuery(rulesetId: string) {
+  return useQuery({
+    queryKey: queryKeys.rulesets.versions(rulesetId),
+    queryFn: () => listRuleSetVersions(rulesetId),
+    enabled: !!rulesetId,
   })
 }
 
@@ -83,7 +103,8 @@ export function useUpdateDraftRuleSetMutation(draftId: string) {
 export function usePublishDraftRuleSetMutation() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: publishDraftRuleSet,
+    mutationFn: ({ draftId, request }: PublishDraftRuleSetVariables) =>
+      publishDraftRuleSet(draftId, request),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.rulesets.all })
     },

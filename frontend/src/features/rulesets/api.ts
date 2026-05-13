@@ -26,10 +26,26 @@ export interface UpdateDraftRuleSetRequest {
   rules: FormatRule[]
   suggested_rules?: FormatRule[]
   parse_warnings?: string[]
+  school?: string | null
+  college?: string | null
+  thesis_type?: string | null
+  version_note?: string | null
 }
 
 export interface UpdateRuleSetRequest {
-  name: string
+  name?: string
+  school?: string | null
+  college?: string | null
+  thesis_type?: string | null
+  version_note?: string | null
+}
+
+export interface PublishDraftRuleSetRequest {
+  name?: string
+  school?: string | null
+  college?: string | null
+  thesis_type?: string | null
+  version_note?: string | null
 }
 
 export async function createRuleSet(ruleset: RuleSet): Promise<RuleSet> {
@@ -39,13 +55,22 @@ export async function createRuleSet(ruleset: RuleSet): Promise<RuleSet> {
   })
 }
 
-export async function listRuleSets(limit = 50, offset = 0): Promise<RuleSet[]> {
+export async function listRuleSets(
+  limit = 50,
+  offset = 0,
+  includeHistory = false,
+): Promise<RuleSet[]> {
   const schema = ruleSetSchema.array()
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
+    include_history: String(includeHistory),
   })
   return apiRequest(`/api/rulesets?${params.toString()}`, schema)
+}
+
+export async function listRuleSetVersions(rulesetId: string): Promise<RuleSet[]> {
+  return apiRequest(`/api/rulesets/${rulesetId}/versions`, ruleSetSchema.array())
 }
 
 export async function updateRuleSet(
@@ -87,8 +112,12 @@ export async function updateDraftRuleSet(
   })
 }
 
-export async function publishDraftRuleSet(draftId: string): Promise<RuleSet> {
+export async function publishDraftRuleSet(
+  draftId: string,
+  request?: PublishDraftRuleSetRequest,
+): Promise<RuleSet> {
   return apiRequest(`/api/draft-rulesets/${draftId}/publish`, ruleSetSchema, {
     method: 'POST',
+    body: request ? JSON.stringify(request) : undefined,
   })
 }

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from docchecker.domain.enums import (
     DraftRuleSetStatus,
@@ -155,12 +155,27 @@ class RuleSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    template_id: str | None = None
     name: str = Field(min_length=1)
     source_type: SourceType
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     locale: str = "zh-CN"
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    template_scope: Literal["personal"] = "personal"
+    previous_ruleset_id: str | None = None
+    is_latest: bool = True
+    version_note: str | None = None
+    archived_at: str | None = None
     rules: list[FormatRule] = Field(default_factory=list)
     created_at: str
+    updated_at: str | None = None
+
+    @computed_field
+    @property
+    def rule_count(self) -> int:
+        return len(self.rules)
 
 
 class DraftRuleSet(BaseModel):
@@ -172,6 +187,11 @@ class DraftRuleSet(BaseModel):
     source_type: SourceType
     version: str = "1.0.0"
     locale: str = "zh-CN"
+    school: str | None = None
+    college: str | None = None
+    thesis_type: str | None = None
+    template_scope: Literal["personal"] = "personal"
+    version_note: str | None = None
     rules: list[FormatRule] = Field(default_factory=list)
     suggested_rules: list[FormatRule] = Field(default_factory=list)
     parse_warnings: list[str] = Field(default_factory=list)

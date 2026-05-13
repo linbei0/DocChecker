@@ -127,12 +127,23 @@ export const ruleExtractionTraceSchema = z.object({
 
 export const ruleSetSchema = z.object({
   id: z.string(),
+  template_id: z.string().nullish(),
   name: z.string(),
   source_type: z.enum(['manual', 'requirement_doc', 'template']),
   version: z.string(),
   locale: z.string().optional(),
+  school: z.string().nullish(),
+  college: z.string().nullish(),
+  thesis_type: z.string().nullish(),
+  template_scope: z.enum(['personal']).optional(),
+  previous_ruleset_id: z.string().nullish(),
+  is_latest: z.boolean().optional(),
+  version_note: z.string().nullish(),
+  archived_at: z.string().nullish(),
   rules: z.array(formatRuleSchema),
+  rule_count: z.number().optional(),
   created_at: z.string(),
+  updated_at: z.string().nullish(),
 })
 
 export const draftRuleSetSchema = z.object({
@@ -142,6 +153,11 @@ export const draftRuleSetSchema = z.object({
   source_type: z.enum(['manual', 'requirement_doc', 'template']),
   version: z.string(),
   locale: z.string().optional(),
+  school: z.string().nullish(),
+  college: z.string().nullish(),
+  thesis_type: z.string().nullish(),
+  template_scope: z.enum(['personal']).optional(),
+  version_note: z.string().nullish(),
   rules: z.array(formatRuleSchema),
   suggested_rules: z.array(formatRuleSchema).optional(),
   parse_warnings: z.array(z.string()),

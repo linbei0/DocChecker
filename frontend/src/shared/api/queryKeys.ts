@@ -5,8 +5,10 @@ export const queryKeys = {
   },
   rulesets: {
     all: ['rulesets'] as const,
-    list: (limit: number, offset: number) => ['rulesets', 'list', limit, offset] as const,
+    list: (limit: number, offset: number, includeHistory = false) =>
+      ['rulesets', 'list', limit, offset, includeHistory] as const,
     detail: (id: string) => ['rulesets', id] as const,
+    versions: (id: string) => ['rulesets', id, 'versions'] as const,
   },
   draftRulesets: {
     all: ['draft-rulesets'] as const,

@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { draftRuleSetSchema } from './model'
+import { draftRuleSetSchema, ruleSetSchema } from './model'
+
+describe('ruleSetSchema', () => {
+  it('validates template metadata and version fields returned by the backend', () => {
+    const result = ruleSetSchema.safeParse({
+      id: 'ruleset_1',
+      template_id: 'tpl_1',
+      name: '示例大学硕士论文模板',
+      source_type: 'manual',
+      version: '1.0.1',
+      locale: 'zh-CN',
+      school: '示例大学',
+      college: '计算机学院',
+      thesis_type: '硕士论文',
+      template_scope: 'personal',
+      previous_ruleset_id: 'ruleset_0',
+      is_latest: true,
+      version_note: '更新学院名称',
+      archived_at: null,
+      rules: [],
+      rule_count: 0,
+      created_at: '2026-05-13T00:00:00+08:00',
+      updated_at: '2026-05-13T00:00:00+08:00',
+    })
+
+    expect(result.success).toBe(true)
+  })
+})
 
 describe('draftRuleSetSchema', () => {
   it('validates draft rulesets returned by the backend', () => {

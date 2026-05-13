@@ -27,7 +27,7 @@ import {
   buildReviewItems,
   countByFilter,
   matchesFilter,
-  type ReviewFilter,
+type ReviewFilter,
   type RuleReviewItem,
 } from './ruleConfirmModel'
 import { createExpectationDraft, serializeExpectationDraft, type ExpectationDraftField, type ExpectationDraftPatch } from './ruleConfirmText'
@@ -40,6 +40,14 @@ import {
   RuleConfirmMissing,
   RuleConfirmProcessing,
 } from './RuleConfirmStates'
+
+interface TemplateMetadataDraft {
+  name: string
+  school: string
+  college: string
+  thesisType: string
+  versionNote: string
+}
 
 export function RuleConfirmPage() {
   const { taskId: draftId = '' } = useParams<{ taskId: string }>()
@@ -54,10 +62,24 @@ export function RuleConfirmPage() {
   const [expectationDraft, setExpectationDraft] = useState<ExpectationDraftField[]>([])
   const [activeFilter, setActiveFilter] = useState<ReviewFilter>('all')
   const [error, setError] = useState<string | null>(null)
+  const [templateMetadata, setTemplateMetadata] = useState<TemplateMetadataDraft>({
+    name: '',
+    school: '',
+    college: '',
+    thesisType: '',
+    versionNote: '',
+  })
 
   useEffect(() => {
     if (draft) {
       setRules([...draft.rules, ...(draft.suggested_rules ?? [])])
+      setTemplateMetadata({
+        name: draft.name,
+        school: draft.school ?? '',
+        college: draft.college ?? '',
+        thesisType: draft.thesis_type ?? '',
+        versionNote: draft.version_note ?? '',
+      })
     }
   }, [draft])
 
@@ -160,9 +182,22 @@ export function RuleConfirmPage() {
       await updateDraftMutation.mutateAsync({
         rules: autoRules,
         suggested_rules: suggestedRules,
-        name: draft.name,
+        name: templateMetadata.name.trim() || draft.name,
+        school: cleanTemplateMetadata(templateMetadata.school),
+        college: cleanTemplateMetadata(templateMetadata.college),
+        thesis_type: cleanTemplateMetadata(templateMetadata.thesisType),
+        version_note: cleanTemplateMetadata(templateMetadata.versionNote),
       })
-      const ruleset = await publishDraftMutation.mutateAsync(draft.id)
+      const ruleset = await publishDraftMutation.mutateAsync({
+        draftId: draft.id,
+        request: {
+          name: templateMetadata.name.trim() || draft.name,
+          school: cleanTemplateMetadata(templateMetadata.school),
+          college: cleanTemplateMetadata(templateMetadata.college),
+          thesis_type: cleanTemplateMetadata(templateMetadata.thesisType),
+          version_note: cleanTemplateMetadata(templateMetadata.versionNote),
+        },
+      })
       const task = await createCheckTaskMutation.mutateAsync({
         document_id: draft.document_id,
         ruleset_id: ruleset.id,
@@ -255,6 +290,54 @@ export function RuleConfirmPage() {
           </Button>
         </div>
       </div>
+
+      <section className="mb-6 rounded-xl border border-neutral-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-neutral-900">模板信息</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              发布后会作为个人模板保存，后续检查可直接复用。
+            </p>
+          </div>
+          <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600">
+            v{draft.version}
+          </span>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_1fr]">
+          <TemplateTextField
+            label="模板名称"
+            value={templateMetadata.name}
+            onChange={(name) => setTemplateMetadata((prev) => ({ ...prev, name }))}
+            placeholder="学校论文格式模板"
+          />
+          <TemplateTextField
+            label="学校"
+            value={templateMetadata.school}
+            onChange={(school) => setTemplateMetadata((prev) => ({ ...prev, school }))}
+            placeholder="未填写"
+          />
+          <TemplateTextField
+            label="学院"
+            value={templateMetadata.college}
+            onChange={(college) => setTemplateMetadata((prev) => ({ ...prev, college }))}
+            placeholder="未填写"
+          />
+          <TemplateTextField
+            label="论文类型"
+            value={templateMetadata.thesisType}
+            onChange={(thesisType) => setTemplateMetadata((prev) => ({ ...prev, thesisType }))}
+            placeholder="本科 / 硕士 / 博士"
+          />
+        </div>
+        <div className="mt-3">
+          <TemplateTextField
+            label="版本备注"
+            value={templateMetadata.versionNote}
+            onChange={(versionNote) => setTemplateMetadata((prev) => ({ ...prev, versionNote }))}
+            placeholder="例如：2026 届论文格式规范"
+          />
+        </div>
+      </section>
 
       {/* Error Alert */}
       {error && (
@@ -493,4 +576,33 @@ export function RuleConfirmPage() {
       </div>
     </div>
   )
+}
+
+function TemplateTextField({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-neutral-500">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-1 h-10 w-full rounded-lg border border-neutral-300 px-3 text-sm text-neutral-900 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+      />
+    </label>
+  )
+}
+
+function cleanTemplateMetadata(value: string) {
+  const trimmed = value.trim()
+  return trimmed || null
 }

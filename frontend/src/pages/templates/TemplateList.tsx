@@ -9,14 +9,22 @@ type TemplateItemProps = {
   ruleSet: RuleSet
   isExpanded: boolean
   isEditing: boolean
-  draftName: string
+  draftMetadata: {
+    name: string
+    school: string
+    college: string
+    thesisType: string
+    versionNote: string
+  }
+  versions: RuleSet[]
+  isLoadingVersions: boolean
   isSaving: boolean
   isDeleting: boolean
   renameError: string | null
   onToggle: () => void
   onStartEditing: () => void
   onCancelEditing: () => void
-  onDraftNameChange: (value: string) => void
+  onDraftMetadataChange: (patch: Partial<TemplateItemProps['draftMetadata']>) => void
   onSubmitRename: (event: FormEvent<HTMLFormElement>) => void
   onDelete: () => void
 }
@@ -25,14 +33,16 @@ export function TemplateCard({
   ruleSet,
   isExpanded,
   isEditing,
-  draftName,
+  draftMetadata,
+  versions,
+  isLoadingVersions,
   isSaving,
   isDeleting,
   renameError,
   onToggle,
   onStartEditing,
   onCancelEditing,
-  onDraftNameChange,
+  onDraftMetadataChange,
   onSubmitRename,
   onDelete,
 }: TemplateItemProps) {
@@ -46,14 +56,18 @@ export function TemplateCard({
           {isEditing ? (
             <form className="space-y-2" onSubmit={onSubmitRename}>
               <input
-                value={draftName}
-                onChange={(event) => onDraftNameChange(event.target.value)}
+                value={draftMetadata.name}
+                onChange={(event) => onDraftMetadataChange({ name: event.target.value })}
                 className="h-10 w-full rounded-lg border border-neutral-300 px-3 text-sm text-neutral-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
                 autoFocus
               />
+              <TemplateMetadataFields
+                draftMetadata={draftMetadata}
+                onDraftMetadataChange={onDraftMetadataChange}
+              />
               {renameError && <p className="text-xs text-danger-600">{renameError}</p>}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" type="submit" isLoading={isSaving} disabled={!draftName.trim()}>
+                <Button size="sm" type="submit" isLoading={isSaving} disabled={!draftMetadata.name.trim()}>
                   保存
                 </Button>
                 <Button type="button" variant="ghost" size="sm" onClick={onCancelEditing}>
@@ -67,7 +81,7 @@ export function TemplateCard({
                 <div className="min-w-0">
                   <h2 className="truncate text-sm font-medium text-neutral-950">{ruleSet.name}</h2>
                   <p className="mt-1 text-xs text-neutral-500">
-                    {sourceText[ruleSet.source_type]} · {ruleSet.rules.length} 条规则
+                    {sourceText[ruleSet.source_type]} · {templateRuleCount(ruleSet)} 条规则
                   </p>
                 </div>
                 <button
@@ -81,7 +95,7 @@ export function TemplateCard({
                 </button>
               </div>
               <p className="mt-2 text-xs text-neutral-400">
-                v{ruleSet.version} · {new Date(ruleSet.created_at).toLocaleString()}
+                {formatTemplateMetadata(ruleSet)} · v{ruleSet.version} · {new Date(ruleSet.created_at).toLocaleString()}
               </p>
               <div className="mt-3 flex items-center justify-between gap-3">
                 <button
@@ -108,7 +122,11 @@ export function TemplateCard({
       </div>
       {isExpanded && (
         <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-          <RuleDetails ruleSet={ruleSet} />
+          <RuleDetails
+            ruleSet={ruleSet}
+            versions={versions}
+            isLoadingVersions={isLoadingVersions}
+          />
         </div>
       )}
     </article>
@@ -119,14 +137,16 @@ export function TemplateRows({
   ruleSet,
   isExpanded,
   isEditing,
-  draftName,
+  draftMetadata,
+  versions,
+  isLoadingVersions,
   isSaving,
   isDeleting,
   renameError,
   onToggle,
   onStartEditing,
   onCancelEditing,
-  onDraftNameChange,
+  onDraftMetadataChange,
   onSubmitRename,
   onDelete,
 }: TemplateItemProps) {
@@ -154,12 +174,12 @@ export function TemplateRows({
                 <form className="space-y-2" onSubmit={onSubmitRename}>
                   <div className="flex flex-wrap items-center gap-2">
                     <input
-                      value={draftName}
-                      onChange={(event) => onDraftNameChange(event.target.value)}
+                      value={draftMetadata.name}
+                      onChange={(event) => onDraftMetadataChange({ name: event.target.value })}
                       className="h-9 min-w-0 flex-1 rounded-lg border border-neutral-300 px-3 text-sm text-neutral-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
                       autoFocus
                     />
-                    <Button size="sm" type="submit" isLoading={isSaving} disabled={!draftName.trim()}>
+                    <Button size="sm" type="submit" isLoading={isSaving} disabled={!draftMetadata.name.trim()}>
                       <Save className="mr-1.5 h-4 w-4" />
                       保存
                     </Button>
@@ -168,13 +188,17 @@ export function TemplateRows({
                       取消
                     </Button>
                   </div>
+                  <TemplateMetadataFields
+                    draftMetadata={draftMetadata}
+                    onDraftMetadataChange={onDraftMetadataChange}
+                  />
                   {renameError && <p className="text-xs text-danger-600">{renameError}</p>}
                 </form>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <div>
                     <div className="font-medium text-neutral-900">{ruleSet.name}</div>
-                    <div className="text-xs text-neutral-400">{ruleSet.id}</div>
+                    <div className="text-xs text-neutral-400">{formatTemplateMetadata(ruleSet)}</div>
                   </div>
                   <button
                     type="button"
@@ -193,7 +217,7 @@ export function TemplateRows({
         <td className="px-5 py-4 align-top text-neutral-700">{sourceText[ruleSet.source_type]}</td>
         <td className="px-5 py-4 align-top text-neutral-700">{ruleSet.version}</td>
         <td className="px-5 py-4 align-top">
-          <StatusBadge status="enabled" text={`${ruleSet.rules.length} 条`} />
+          <StatusBadge status="enabled" text={`${templateRuleCount(ruleSet)} 条`} />
         </td>
         <td className="px-5 py-4 align-top text-neutral-500">
           {new Date(ruleSet.created_at).toLocaleString()}
@@ -214,7 +238,11 @@ export function TemplateRows({
       {isExpanded && (
         <tr className="hidden bg-white lg:table-row">
           <td colSpan={7} className="border-t border-primary-100 px-5 py-5">
-            <RuleDetails ruleSet={ruleSet} />
+            <RuleDetails
+              ruleSet={ruleSet}
+              versions={versions}
+              isLoadingVersions={isLoadingVersions}
+            />
           </td>
         </tr>
       )}
@@ -222,7 +250,15 @@ export function TemplateRows({
   )
 }
 
-export function RuleDetails({ ruleSet }: { ruleSet: RuleSet }) {
+export function RuleDetails({
+  ruleSet,
+  versions = [],
+  isLoadingVersions = false,
+}: {
+  ruleSet: RuleSet
+  versions?: RuleSet[]
+  isLoadingVersions?: boolean
+}) {
   return (
     <div>
       <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -232,7 +268,33 @@ export function RuleDetails({ ruleSet }: { ruleSet: RuleSet }) {
             展示每条模板规则的检查对象、期望值和来源依据。
           </p>
         </div>
-        <p className="text-xs text-neutral-500">模板 ID：{ruleSet.id}</p>
+        <p className="text-xs text-neutral-500">模板 ID：{ruleSet.template_id || ruleSet.id}</p>
+      </div>
+
+      <div className="mb-4 rounded-lg border border-neutral-200 bg-white px-4 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h4 className="text-xs font-semibold text-neutral-700">版本历史</h4>
+            <p className="mt-1 text-xs text-neutral-500">
+              {isLoadingVersions ? '正在加载版本...' : `共 ${versions.length || 1} 个版本`}
+            </p>
+          </div>
+          <div className="grid gap-2 text-xs text-neutral-600 sm:grid-cols-2 lg:min-w-[520px]">
+            {(versions.length ? versions : [ruleSet]).slice(0, 4).map((version) => (
+              <div key={version.id} className="rounded-md bg-neutral-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-neutral-900">v{version.version}</span>
+                  {version.is_latest !== false && (
+                    <span className="rounded-full bg-primary-50 px-2 py-0.5 text-primary-700">最新</span>
+                  )}
+                </div>
+                <p className="mt-1 truncate">{version.name}</p>
+                <p className="mt-1 text-neutral-400">{new Date(version.created_at).toLocaleString()}</p>
+                {version.version_note && <p className="mt-1 text-neutral-500">{version.version_note}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {ruleSet.rules.length === 0 ? (
@@ -308,6 +370,75 @@ function InfoBlock({
       </dd>
     </div>
   )
+}
+
+function TemplateMetadataFields({
+  draftMetadata,
+  onDraftMetadataChange,
+}: {
+  draftMetadata: TemplateItemProps['draftMetadata']
+  onDraftMetadataChange: TemplateItemProps['onDraftMetadataChange']
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <TemplateMetadataInput
+        label="学校"
+        value={draftMetadata.school}
+        placeholder="未填写"
+        onChange={(school) => onDraftMetadataChange({ school })}
+      />
+      <TemplateMetadataInput
+        label="学院"
+        value={draftMetadata.college}
+        placeholder="未填写"
+        onChange={(college) => onDraftMetadataChange({ college })}
+      />
+      <TemplateMetadataInput
+        label="论文类型"
+        value={draftMetadata.thesisType}
+        placeholder="本科 / 硕士 / 博士"
+        onChange={(thesisType) => onDraftMetadataChange({ thesisType })}
+      />
+      <TemplateMetadataInput
+        label="版本备注"
+        value={draftMetadata.versionNote}
+        placeholder="本次更新说明"
+        onChange={(versionNote) => onDraftMetadataChange({ versionNote })}
+      />
+    </div>
+  )
+}
+
+function TemplateMetadataInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-neutral-500">{label}</span>
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-9 w-full rounded-lg border border-neutral-300 px-3 text-sm text-neutral-900 outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+      />
+    </label>
+  )
+}
+
+function formatTemplateMetadata(ruleSet: RuleSet) {
+  return [ruleSet.school, ruleSet.college, ruleSet.thesis_type].filter(Boolean).join(' / ') || '个人模板'
+}
+
+function templateRuleCount(ruleSet: RuleSet) {
+  return ruleSet.rule_count ?? ruleSet.rules.length
 }
 
 function formatTarget(rule: FormatRule) {

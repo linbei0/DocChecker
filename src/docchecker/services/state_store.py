@@ -130,11 +130,71 @@ class SqliteStateStore:
     def get_ruleset(self, ruleset_id: str) -> RuleSet | None:
         return self.get_record("ruleset", ruleset_id, RuleSet)
 
-    def list_rulesets(self, *, limit: int = 50, offset: int = 0) -> list[RuleSet]:
-        return self.list_records("ruleset", RuleSet, limit=limit, offset=offset)
+    def list_rulesets(
+        self,
+        *,
+        include_history: bool = False,
+        include_archived: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[RuleSet]:
+        rulesets = self.list_records(
+            "ruleset",
+            RuleSet,
+            newest_first=True,
+            limit=10000,
+            offset=0,
+        )
+        filtered = [
+            ruleset
+            for ruleset in rulesets
+            if (include_history or ruleset.is_latest)
+            and (include_archived or ruleset.archived_at is None)
+        ]
+        return filtered[offset : offset + limit]
+
+    def list_ruleset_versions(
+        self,
+        ruleset_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[RuleSet]:
+        current = self.get_ruleset(ruleset_id)
+        if current is None:
+            return []
+        template_id = current.template_id or current.id
+        versions = [
+            ruleset
+            for ruleset in self.list_rulesets(
+                include_history=True,
+                include_archived=include_archived,
+                limit=10000,
+            )
+            if (ruleset.template_id or ruleset.id) == template_id
+        ]
+        return sorted(versions, key=lambda item: item.created_at, reverse=True)
 
     def delete_ruleset(self, ruleset_id: str) -> bool:
-        return self.delete_record("ruleset", ruleset_id)
+        ruleset = self.get_ruleset(ruleset_id)
+        if ruleset is None:
+            return False
+        if ruleset.archived_at is not None:
+            return False
+        archived_at = _now()
+        versions = self.list_ruleset_versions(ruleset_id, include_archived=True)
+        self.save_many(
+            [
+                (
+                    "ruleset",
+                    version.id,
+                    version.model_copy(
+                        update={"archived_at": archived_at, "updated_at": archived_at}
+                    ),
+                )
+                for version in versions
+            ]
+        )
+        return True
 
     def save_draft_ruleset(self, draft: DraftRuleSet) -> None:
         self.save_record("draft_ruleset", draft.id, draft)
@@ -194,7 +254,13 @@ class SqliteStateStore:
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
             """,
-            (kind, record_id, payload.model_dump_json(), created_at, updated_at),
+            (
+                kind,
+                record_id,
+                payload.model_dump_json(exclude_computed_fields=True),
+                created_at,
+                updated_at,
+            ),
         )
 
     def _ensure_kind(self, kind: str) -> None:

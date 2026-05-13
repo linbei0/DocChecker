@@ -92,7 +92,11 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
 
     publish_response = client.post(f"/api/draft-rulesets/{draft['id']}/publish")
     assert publish_response.status_code == 200
-    ruleset_id = publish_response.json()["id"]
+    published_ruleset = publish_response.json()
+    ruleset_id = published_ruleset["id"]
+    assert published_ruleset["template_id"]
+    assert published_ruleset["template_scope"] == "personal"
+    assert published_ruleset["rule_count"] == len(published_ruleset["rules"])
 
     task_response = client.post(
         "/api/check-tasks",
@@ -152,13 +156,22 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     renamed_ruleset = rename_response.json()
     assert renamed_ruleset["name"] == "学校论文格式模板"
     assert renamed_ruleset["rules"]
+    assert renamed_ruleset["id"] != ruleset_id
+    assert renamed_ruleset["previous_ruleset_id"] == ruleset_id
+    assert renamed_ruleset["version"] == "1.0.1"
+    versions_response = client.get(f"/api/rulesets/{renamed_ruleset['id']}/versions")
+    assert versions_response.status_code == 200
+    assert [item["id"] for item in versions_response.json()] == [
+        renamed_ruleset["id"],
+        ruleset_id,
+    ]
 
     main.state_store = SqliteStateStore(main.state_store.path)
     main.state_store.initialize()
     renamed_list_response = client.get("/api/rulesets")
     assert renamed_list_response.status_code == 200
     assert any(
-        item["id"] == ruleset_id and item["name"] == "学校论文格式模板"
+        item["id"] == renamed_ruleset["id"] and item["name"] == "学校论文格式模板"
         for item in renamed_list_response.json()
     )
 
@@ -169,14 +182,17 @@ def test_manual_ruleset_check_flow(tmp_path: Path) -> None:
     assert client.get(f"/api/reports/{task['report_id']}").status_code == 404
     assert not main.storage.report_path(task["report_id"]).exists()
 
-    delete_ruleset_response = client.delete(f"/api/rulesets/{ruleset_id}")
+    delete_ruleset_response = client.delete(f"/api/rulesets/{renamed_ruleset['id']}")
     assert delete_ruleset_response.status_code == 200
-    assert delete_ruleset_response.json() == {"id": ruleset_id, "deleted": True}
-    assert not any(item["id"] == ruleset_id for item in client.get("/api/rulesets").json())
+    assert delete_ruleset_response.json() == {"id": renamed_ruleset["id"], "deleted": True}
+    assert not any(
+        item["id"] in {ruleset_id, renamed_ruleset["id"]}
+        for item in client.get("/api/rulesets").json()
+    )
     paged_ruleset_response = client.get("/api/rulesets?limit=1&offset=0")
     assert paged_ruleset_response.status_code == 200
     assert len(paged_ruleset_response.json()) <= 1
-    assert client.delete(f"/api/rulesets/{ruleset_id}").status_code == 404
+    assert client.delete(f"/api/rulesets/{renamed_ruleset['id']}").status_code == 404
     assert client.delete(f"/api/check-tasks/{task['id']}").status_code == 404
 
 
@@ -257,6 +273,60 @@ def test_requirement_document_draft_is_created_before_background_extraction(
     assert persisted["status"] == "draft"
     assert persisted["rules"]
     assert persisted["error"] is None
+
+
+def test_publish_draft_ruleset_saves_template_metadata(tmp_path: Path) -> None:
+    docx_path = tmp_path / "paper.docx"
+    _create_docx(docx_path, "正文内容")
+    client = TestClient(app)
+
+    with docx_path.open("rb") as file:
+        document_response = client.post(
+            "/api/documents",
+            files={
+                "file": (
+                    "paper.docx",
+                    file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+    document_id = document_response.json()["document_id"]
+    draft_response = client.post(
+        "/api/draft-rulesets",
+        json={
+            "document_id": document_id,
+            "source_type": "manual",
+            "manual_text": "正文宋体小四。",
+            "school": "示例大学",
+            "college": "研究生院",
+            "thesis_type": "硕士论文",
+            "version_note": "2026 届规范",
+        },
+    )
+    assert draft_response.status_code == 200
+    draft = draft_response.json()
+
+    publish_response = client.post(
+        f"/api/draft-rulesets/{draft['id']}/publish",
+        json={
+            "name": "示例大学硕士论文模板",
+            "school": "示例大学",
+            "college": "计算机学院",
+            "thesis_type": "硕士论文",
+            "version_note": "人工确认后发布",
+        },
+    )
+
+    assert publish_response.status_code == 200
+    ruleset = publish_response.json()
+    assert ruleset["name"] == "示例大学硕士论文模板"
+    assert ruleset["school"] == "示例大学"
+    assert ruleset["college"] == "计算机学院"
+    assert ruleset["thesis_type"] == "硕士论文"
+    assert ruleset["version_note"] == "人工确认后发布"
+    assert ruleset["version"] == "1.0.0"
+    assert ruleset["rule_count"] == len(ruleset["rules"])
 
 
 def test_check_task_uses_rq_enqueue_without_inline_execution(
